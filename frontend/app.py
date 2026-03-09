@@ -11,11 +11,14 @@ import fastf1
 st.set_page_config(page_title="ApexHunter Dashboard", layout="wide")
 
 # Directory where Parquet files are stored (Now points to the cleaned data lake)
-# Note: Since this file is in 'frontend/', we step out one level to reach 'data_lake'
-DATA_LAKE_DIR = Path("../data_lake/clean_data")
+# Use script location to resolve paths, so it works regardless of working directory
+SCRIPT_DIR = Path(__file__).parent
+DATA_LAKE_DIR = SCRIPT_DIR / ".." / "data_lake" / "clean_data"
 
 # Basic cache directory for fastf1
-fastf1.Cache.enable_cache('../cache') 
+CACHE_DIR = SCRIPT_DIR / ".." / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
+fastf1.Cache.enable_cache(str(CACHE_DIR))
 
 # --- HEADER ---
 st.title("🏎️ ApexHunter F1 Data Explorer")
