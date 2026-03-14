@@ -14,48 +14,55 @@
 ================================================================================
 """
 
-import os
 import sys
 import cv2
 import csv
 import torch
 import numpy as np
+import argparse
+from pathlib import Path
+from typing import Tuple, Optional, Any
 from tqdm import tqdm
+from utils import setup_logger, DATA_LAKE_DIR, PROJECT_ROOT, CONFIG
+
+logger = setup_logger(__name__)
 
 try:
     from ultralytics import YOLO
 except ImportError:
-    print("[ERROR] ultralytics is not installed. Run: pip install ultralytics")
+    logger.error("ultralytics is not installed. Run: pip install ultralytics")
     sys.exit(1)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-MODEL_PATH = os.path.join("models", "best.pt")
-INPUT_VIDEO = os.path.join("data_lake", "edited_videos", "2024", "01_bahrain_ver_pole - Trim.mp4")
-OUTPUT_DIR = os.path.join("data_lake", "processed_video")
-OUTPUT_CSV_DIR = os.path.join("data_lake", "processed_csv")
+MODEL_PATH = PROJECT_ROOT / "models" / "best.pt"
+DEFAULT_INPUT_VIDEO = DATA_LAKE_DIR / "edited_videos" / "2024" / "01_bahrain_ver_pole - Trim.mp4"
+OUTPUT_DIR = DATA_LAKE_DIR / "processed_video"
+OUTPUT_CSV_DIR = DATA_LAKE_DIR / "processed_csv"
+
+inf_config = CONFIG.get("inference", {})
 
 # Thresholds (in pixels) for Apex Status categorization
-HIT_THRESHOLD = 130    # Distance < 130px = Hitting apex
-NEAR_THRESHOLD = 250   # Distance < 250px = Near apex
+HIT_THRESHOLD = inf_config.get("hit_threshold", 130)    # Distance < 130px = Hitting apex
+NEAR_THRESHOLD = inf_config.get("near_threshold", 250)   # Distance < 250px = Near apex
 
 # Screen coordinates for the front wheels (approximate based on F1 T-cam)
 # These may need slight tuning depending on the exact video resolution
-LEFT_WHEEL_X = 250
-RIGHT_WHEEL_X = 1030
-WHEEL_Y = 600
+LEFT_WHEEL_X = inf_config.get("left_wheel_x", 250)
+RIGHT_WHEEL_X = inf_config.get("right_wheel_x", 1030)
+WHEEL_Y = inf_config.get("wheel_y", 600)
 
 # Transparency for HUD blending
-ALPHA = 0.5
+ALPHA = inf_config.get("alpha", 0.5)
 
 # Ensure output directories exist
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(OUTPUT_CSV_DIR, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_CSV_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── Core Logic ────────────────────────────────────────────────────────────────
 
-def get_closest_distance(ref_point, contour):
+def get_closest_distance(ref_point: Tuple[int, int], contour: Any) -> Tuple[float, Optional[Tuple[int, int]]]:
     """
     Calculates the shortest Euclidean distance from a reference point (wheel)
     to any point on the provided contour. Also returns the closest point's coords.
@@ -76,32 +83,31 @@ def get_closest_distance(ref_point, contour):
     return min_dist, tuple(closest_pt)
 
 
-def process_video():
-    print("======================================================")
-    print("   ApexHunter - Phase 4 & 5: Inference Pipeline")
-    print("======================================================\n")
+def process_video(input_video_path: Path) -> None:
+    logger.info("======================================================")
+    logger.info("   ApexHunter - Phase 4 & 5: Inference Pipeline")
+    logger.info("======================================================")
 
-    if not os.path.exists(MODEL_PATH):
-        print(f"[ERROR] Trained model not found at: {MODEL_PATH}")
+    if not MODEL_PATH.exists():
+        logger.error(f"Trained model not found at: {MODEL_PATH}")
         sys.exit(1)
         
-    if not os.path.exists(INPUT_VIDEO):
-        print(f"[ERROR] Input video not found at: {INPUT_VIDEO}")
+    if not input_video_path.exists():
+        logger.error(f"Input video not found at: {input_video_path}")
         sys.exit(1)
 
-    print(f"[INFO] Loading model: {MODEL_PATH}")
+    logger.info(f"Loading model: {MODEL_PATH}")
     # Run on GPU if available (User probably has CPU, but model runs fine on CPU)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = YOLO(MODEL_PATH).to(device)
     
     # Extract file names
-    basename = os.path.basename(INPUT_VIDEO)
-    name_no_ext = os.path.splitext(basename)[0]
-    out_video_path = os.path.join(OUTPUT_DIR, f"{name_no_ext}_HUD.mp4")
-    out_csv_path = os.path.join(OUTPUT_CSV_DIR, f"{name_no_ext}_metrics.csv")
+    name_no_ext = input_video_path.stem
+    out_video_path = OUTPUT_DIR / f"{name_no_ext}_HUD.mp4"
+    out_csv_path = OUTPUT_CSV_DIR / f"{name_no_ext}_metrics.csv"
     
     # Open Video
-    cap = cv2.VideoCapture(INPUT_VIDEO)
+    cap = cv2.VideoCapture(str(input_video_path))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -109,7 +115,7 @@ def process_video():
     
     # Video Writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(out_video_path, fourcc, fps, (width, height))
+    out = cv2.VideoWriter(str(out_video_path), fourcc, fps, (width, height))
     
     # Setup CSV Writer
     csv_file = open(out_csv_path, mode='w', newline='')
@@ -117,12 +123,16 @@ def process_video():
     csv_writer.writerow(['frame_number', 'timestamp_sec', 'distance_px', 'status', 'has_curb'])
     
     # The reference points for the left and right wheels
-    # Adjusted dynamically based on video resolution (assuming 1280x720 standard)
-    left_wheel = (int(width * 0.20), int(height * 0.85))
-    right_wheel = (int(width * 0.80), int(height * 0.85))
+    left_wheel = (int(width * (LEFT_WHEEL_X / 1280)), int(height * (WHEEL_Y / 720))) if LEFT_WHEEL_X <= 1280 else (LEFT_WHEEL_X, WHEEL_Y)
+    right_wheel = (int(width * (RIGHT_WHEEL_X / 1280)), int(height * (WHEEL_Y / 720))) if RIGHT_WHEEL_X <= 1280 else (RIGHT_WHEEL_X, WHEEL_Y)
+    # the above ensures coordinates adapt if config was set for 720p but video is 1080p, as a safeguard
+    
+    # Actually, simplest is to just use config values directly. Adjust manual override if needed.
+    left_wheel = (LEFT_WHEEL_X, WHEEL_Y)
+    right_wheel = (RIGHT_WHEEL_X, WHEEL_Y)
     center_x = width // 2
     
-    print(f"[INFO] Starting inference on {total_frames} frames...")
+    logger.info(f"Starting inference on {total_frames} frames...")
     
     for frame_idx in tqdm(range(total_frames), desc="Processing", unit="frame"):
         ret, frame = cap.read()
@@ -245,11 +255,15 @@ def process_video():
     out.release()
     csv_file.close()
     
-    print(f"\n======================================================")
-    print(f"  [DONE] Processing Complete!")
-    print(f"         Video saved: {os.path.abspath(out_video_path)}")
-    print(f"         CSV saved:   {os.path.abspath(out_csv_path)}")
-    print(f"======================================================")
+    logger.info("======================================================")
+    logger.info("  [DONE] Processing Complete!")
+    logger.info(f"         Video saved: {out_video_path.resolve()}")
+    logger.info(f"         CSV saved:   {out_csv_path.resolve()}")
+    logger.info("======================================================")
 
 if __name__ == "__main__":
-    process_video()
+    parser = argparse.ArgumentParser(description="Run YOLO inference on F1 pole lap video.")
+    parser.add_argument('--input', type=str, default=str(DEFAULT_INPUT_VIDEO), help="Path to input video file.")
+    args = parser.parse_args()
+    
+    process_video(Path(args.input))

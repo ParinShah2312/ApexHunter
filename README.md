@@ -1,68 +1,109 @@
 # 🏎️ ApexHunter F1 Analytics
 
-ApexHunter is an interactive Big Data dashboard built to visualize, process, and demystify Formula 1 telemetry. It ingests gigabytes of raw FastF1 Parquet data, cleans it through a custom ETL pipeline, and serves an intuitive, gamified UI for racing fans and newcomers alike.
+ApexHunter is an interactive Big Data dashboard built to visualize, process, and analyze Formula 1 telemetry. It ingests gigabytes of raw FastF1 data, cleans it through a custom ETL pipeline, runs a YOLOv11 computer vision model for apex detection, and serves an intuitive, gamified Streamlit UI for racing fans and newcomers alike.
 
-## 📁 Repository Architecture
-
-To maintain clean separation of concerns, the project is structured as follows:
+## 📁 Project Structure
 
 ```text
 ApexHunter 2.0/
 │
 ├── backend/
+│   ├── config.json                        # Centralized configuration (seasons, circuits, thresholds)
 │   └── scripts/
-│       ├── download_season_data.py  # Stage 1: Fetches FastF1 telemetry and saves as raw Parquet.
-│       ├── download_raw_video.py    # Fetches auxiliary track video data via yt-dlp.
-│       └── clean_telemetry.py       # Stage 2: The ETL Script. Drops NaNs, clips outliers to `clean_data/`.
+│       ├── utils.py                       # Shared paths, logging, and config loader
+│       ├── download_season_data.py        # Stage 1: Fetches FastF1 telemetry as raw Parquet
+│       ├── download_manual_videos.py      # Downloads pole lap onboard videos via yt-dlp
+│       ├── download_satellite_images.py   # Downloads circuit satellite images (ThreadPoolExecutor)
+│       ├── clean_telemetry.py             # Stage 2: ETL — cleans, clips outliers → clean_data/
+│       ├── extract_frames.py              # Extracts video frames at 5fps (ProcessPoolExecutor)
+│       ├── select_training_frames.py      # Selects ~500 diverse frames for YOLO annotation
+│       └── run_inference.py               # Stage 3: Runs YOLOv11-Seg + Apex Deviation Metric
 │
 ├── frontend/
-│   └── app.py                       # Stage 3: The Streamlit Dashboard.
+│   ├── app.py                             # Streamlit entry point (slim orchestrator)
+│   ├── config.py                          # Frontend paths, constants, driver mapping
+│   └── components/
+│       ├── sidebar.py                     # Year / Session / Driver filters
+│       ├── data_loader.py                 # Cached parquet loading + downsampling
+│       ├── telemetry_charts.py            # Speed / Throttle / Brake subplots + metrics
+│       └── track_map.py                   # WebGL scatter track map (Scattergl)
 │
-├── data_lake/                       # The central storage layer (Big Data Principle)
-│   ├── season_data/                 # Raw ingestion layer (.parquet files)
-│   └── clean_data/                  # Processed presentation layer (.parquet files)
+├── data_lake/                             # Central data storage layer (gitignored)
+│   ├── season_data/                       # Raw ingestion layer (.parquet)
+│   ├── clean_data/                        # Processed presentation layer (.parquet)
+│   ├── raw_video/                         # Downloaded onboard pole lap videos
+│   ├── edited_videos/                     # Trimmed videos for frame extraction
+│   ├── cv_frames/                         # Extracted frames at 5fps
+│   ├── cv_dataset/                        # Roboflow annotation upload folder
+│   ├── satellite_images/                  # Circuit satellite imagery
+│   ├── processed_video/                   # YOLO HUD overlay output videos
+│   └── processed_csv/                     # Apex deviation metric CSVs
 │
-├── docs/
-│   └── architecture.md              # Detailed breakdown of the ETL pipeline
+├── models/                                # Trained YOLOv11-Seg weights (best.pt)
+├── cache/                                 # FastF1 API cache (gitignored)
+├── docs/                                  # Project documentation
+│   ├── architecture.md
+│   ├── Dataset Documentation Template.docx
+│   ├── Dataset_Documentation_Answers.md
+│   └── Studio_32_Dataset_Documentation.docx
 │
-└── requirements.txt
+├── .gitignore
+├── requirements.txt
+└── README.md
 ```
 
 ## 🚀 Getting Started
 
-### 1. Installation
-1. Clone the repository to your local machine.
-2. Ensure you have Python 3.10+ installed.
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 1. Clone & Install
+```bash
+git clone https://github.com/ParinShah2312/ApexHunter.git
+cd "ApexHunter 2.0"
+python -m venv .venv
+.venv\Scripts\Activate.ps1          # Windows
+pip install -r requirements.txt
+```
 
-### 2. The Data Pipeline (Backend)
-If you need to fetch brand new data or process existing raw data, navigate to the project root and run the backend scripts:
+### 2. Data Pipeline (Backend)
 
-**(Optional) Download Raw Data:**
+**Download raw telemetry** (optional — data is already included):
 ```bash
 python backend/scripts/download_season_data.py
 ```
-*Depending on the season, this ingests large amounts of telemetry directly from the official F1 timing APIs and saves them in `data_lake/season_data/`.*
 
-**Clean the Data:**
+**Clean & transform the data:**
 ```bash
 python backend/scripts/clean_telemetry.py
 ```
-*This acts as the Transformation step in our ETL pipeline. It strips dropped packets, clamps impossible speed/RPM outliers, and optimizes the Parquet schema saving the output to `data_lake/clean_data/`.*
 
-### 3. Running the Dashboard (Frontend)
-To launch the interactive F1 dashboard, ensure you are in the project root and run:
-
+**Run YOLO inference on a pole lap video:**
 ```bash
-cd frontend
-streamlit run app.py
+python backend/scripts/run_inference.py --input "data_lake/edited_videos/2024/01_bahrain_ver_pole - Trim.mp4"
 ```
 
-### 🎯 Key Features
-- **Beginner Mode:** Toggle simple terms like "Gas Pedal" instead of "Throttle %" to make telemetry accessible to non-racing fans.
-- **Traffic Light Track Map:** A dynamic spatial scatter plot coloring the track based on braking (Red) and acceleration (Green) zones.
-- **Telemetry Playback Scrubber:** An interactive time slider that dynamically filters the graphs so you can "scrub" through a lap.
-- **Automated Data Cleaning:** A robust python backend script that ensures Streamlit never crashes due to dropped sensor packets.
+### 3. Launch the Dashboard
+```bash
+streamlit run frontend/app.py
+```
+
+## 🎯 Key Features
+
+| Feature | Description |
+|---|---|
+| **Telemetry Playback** | Interactive time slider to scrub through Speed, Throttle, and Brake data |
+| **Traffic Light Track Map** | WebGL scatter plot coloring the circuit by speed (red→yellow→green) |
+| **Perfect Corner Score** | Gamified metric showing how well the driver avoids overlapping brake + throttle |
+| **Beginner Mode** | Toggle simplified labels ("Gas Pedal" instead of "Throttle %") |
+| **YOLOv11 Apex Detection** | Computer vision pipeline that detects curbs and calculates apex deviation |
+| **Cached Data Loading** | `@st.cache_data` ensures instant driver switches without disk re-reads |
+| **Concurrent Processing** | ThreadPool/ProcessPool executors for downloads and frame extraction |
+
+## 🛠️ Tech Stack
+
+- **Frontend:** Streamlit, Plotly (WebGL), Pandas
+- **Backend:** Python 3.10+, FastF1, OpenCV, yt-dlp, Ultralytics YOLOv11
+- **Data:** Parquet files, FastF1 API, Roboflow (annotation)
+- **Linting:** Ruff
+
+## 👤 Author
+
+**Parin Shah** — Student ID: 23001091

@@ -1,7 +1,12 @@
-fastf1
 pandas
-pyarrow
-fastparquet
+numpy
+fastf1
+opencv-python
+yt-dlp
+ultralytics
+staticmap
+tqdm
 streamlit
 plotly
-yt-dlp
+torch
+ruff

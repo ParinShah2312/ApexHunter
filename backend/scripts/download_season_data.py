@@ -1,19 +1,17 @@
 import fastf1
 import pandas as pd
-import os
-import logging
+from typing import List
 from pathlib import Path
+from utils import setup_logger, DATA_LAKE_DIR, CACHE_DIR, CONFIG
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Constants
-SEASONS = [2023, 2024]
-DATA_LAKE_DIR = Path("data_lake/season_data")
-CACHE_DIR = Path("cache")
+SEASONS: List[int] = CONFIG.get("seasons", [2023, 2024])
+DATA_LAKE_DIR = DATA_LAKE_DIR / "season_data"
 
-def setup_directories():
+def setup_directories() -> None:
     """Creates necessary directories for data storage and caching."""
     DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(exist_ok=True)
@@ -21,7 +19,7 @@ def setup_directories():
     logger.info(f"Data lake directory: {DATA_LAKE_DIR}")
     logger.info(f"Cache directory: {CACHE_DIR}")
 
-def get_directory_size(directory):
+def get_directory_size(directory: Path) -> str:
     """Calculates the total size of files in a directory in MB."""
     total_size = 0
     for path in directory.rglob('*'):
@@ -31,7 +29,7 @@ def get_directory_size(directory):
     size_mb = total_size / (1024 * 1024)
     return f"{size_mb:.2f} MB"
 
-def process_session(year, round_num, session_type):
+def process_session(year: int, round_num: int, session_type: str) -> None:
     """Downloads and processes data for a specific round and session."""
     file_name = f"{year}_{round_num}_{session_type}.parquet"
     file_path = DATA_LAKE_DIR / file_name
@@ -91,7 +89,7 @@ def process_session(year, round_num, session_type):
     except Exception as e:
         logger.error(f"Error processing {year} Round {round_num} {session_type}: {e}")
 
-def main():
+def main() -> None:
     setup_directories()
     
     for year in SEASONS:

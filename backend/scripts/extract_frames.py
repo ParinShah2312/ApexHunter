@@ -8,31 +8,37 @@
 ================================================================================
 """
 
-import os
 import sys
-import glob
+import os
+import argparse
+import concurrent.futures
+from pathlib import Path
+from utils import setup_logger, DATA_LAKE_DIR, CONFIG
+
+logger = setup_logger(__name__)
 
 try:
     import cv2
 except ImportError:
-    print("[ERROR] opencv-python is not installed.")
-    print("        Run:  pip install opencv-python")
+    logger.error("opencv-python is not installed.")
+    logger.error("Run:  pip install opencv-python")
     sys.exit(1)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-VIDEO_ROOT = os.path.join("data_lake", "edited_videos")
-OUTPUT_ROOT = os.path.join("data_lake", "cv_frames")
-TARGET_FPS = 5  # Extract 5 frames per second
+VIDEO_ROOT = DATA_LAKE_DIR / "edited_videos"
+OUTPUT_ROOT = DATA_LAKE_DIR / "cv_frames"
+TARGET_FPS = CONFIG.get("cv_frames", {}).get("target_fps", 5)  # Extract 5 frames per second
+SEASONS = CONFIG.get("seasons", ["2023", "2024"])
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def extract_frames_from_video(video_path, output_dir):
+def extract_frames_from_video(video_path: Path, output_dir: Path) -> int:
     """Extract frames at TARGET_FPS from a single video."""
     
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        print(f"  [ERROR] Could not open: {video_path}")
+        logger.error(f"Could not open: {video_path.name}")
         return 0
     
     video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -42,9 +48,9 @@ def extract_frames_from_video(video_path, output_dir):
     # Calculate frame interval: skip this many frames between captures
     frame_interval = int(video_fps / TARGET_FPS) if video_fps > 0 else 1
     
-    print(f"  Video FPS: {video_fps:.1f} | Duration: {duration_sec:.1f}s | Interval: every {frame_interval} frames")
+    logger.info(f"{video_path.name} | FPS: {video_fps:.1f} | Duration: {duration_sec:.1f}s | Interval: every {frame_interval} frames")
     
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     frame_count = 0
     saved_count = 0
@@ -57,8 +63,8 @@ def extract_frames_from_video(video_path, output_dir):
         if frame_count % frame_interval == 0:
             saved_count += 1
             filename = f"frame_{saved_count:05d}.jpg"
-            filepath = os.path.join(output_dir, filename)
-            cv2.imwrite(filepath, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            filepath = output_dir / filename
+            cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         
         frame_count += 1
     
@@ -66,43 +72,57 @@ def extract_frames_from_video(video_path, output_dir):
     return saved_count
 
 
-def main():
-    print("======================================================")
-    print("   ApexHunter - Frame Extraction (5fps)")
-    print("======================================================\n")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Extract frames from videos for CV training.")
+    parser.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1), help="Number of concurrent processes.")
+    args = parser.parse_args()
+
+    logger.info("======================================================")
+    logger.info("   ApexHunter - Frame Extraction (5fps)")
+    logger.info(f"   Using Process Pool with {args.workers} workers")
+    logger.info("======================================================")
     
     total_extracted = 0
+    tasks = []
     
-    for year in ["2023", "2024"]:
-        year_video_dir = os.path.join(VIDEO_ROOT, year)
+    for year in SEASONS:
+        year_str = str(year)
+        year_video_dir = VIDEO_ROOT / year_str
         
-        if not os.path.isdir(year_video_dir):
-            print(f"[WARN] Directory not found: {year_video_dir}. Skipping.")
+        if not year_video_dir.is_dir():
+            logger.warning(f"Directory not found: {year_video_dir}. Skipping.")
             continue
         
-        videos = sorted(glob.glob(os.path.join(year_video_dir, "*.mp4")))
-        print(f"[INFO] Year {year}: Found {len(videos)} videos in {os.path.abspath(year_video_dir)}\n")
+        videos = sorted(year_video_dir.glob("*.mp4"))
+        logger.info(f"Year {year_str}: Found {len(videos)} videos in {year_video_dir.resolve()}")
         
         for video_path in videos:
-            video_name = os.path.splitext(os.path.basename(video_path))[0]
-            output_dir = os.path.join(OUTPUT_ROOT, year, video_name)
+            video_name = video_path.stem
+            output_dir = OUTPUT_ROOT / year_str / video_name
             
             # Skip if already extracted
-            if os.path.isdir(output_dir) and len(os.listdir(output_dir)) > 0:
-                existing = len(os.listdir(output_dir))
-                print(f"  [SKIP] {video_name} ({existing} frames already exist)")
+            if output_dir.is_dir() and any(output_dir.iterdir()):
+                existing = sum(1 for _ in output_dir.iterdir())
+                logger.info(f"SKIP - {video_name} ({existing} frames already exist)")
                 total_extracted += existing
                 continue
             
-            print(f"\n  >>> Extracting: {video_name}")
-            count = extract_frames_from_video(video_path, output_dir)
-            total_extracted += count
-            print(f"      Saved {count} frames -> {os.path.abspath(output_dir)}")
-    
-    print("\n======================================================")
-    print(f"  [DONE] Total frames extracted: {total_extracted}")
-    print(f"         Output: {os.path.abspath(OUTPUT_ROOT)}")
-    print("======================================================")
+            tasks.append((video_path, output_dir))
+
+    if tasks:
+        logger.info(f"\nStarting extraction for {len(tasks)} new videos in parallel...")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as executor:
+            # Map the function over the argument tuples
+            futures = [executor.submit(extract_frames_from_video, vp, od) for vp, od in tasks]
+            
+            for future in concurrent.futures.as_completed(futures):
+                count = future.result()
+                total_extracted += count
+                
+    logger.info("======================================================")
+    logger.info(f"  [DONE] Total frames extracted: {total_extracted}")
+    logger.info(f"         Output: {OUTPUT_ROOT.resolve()}")
+    logger.info("======================================================")
 
 
 if __name__ == "__main__":

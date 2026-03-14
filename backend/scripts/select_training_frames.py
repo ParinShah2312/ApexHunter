@@ -14,50 +14,49 @@
 ================================================================================
 """
 
-import os
-import sys
-import glob
 import shutil
 import random
+from utils import setup_logger, DATA_LAKE_DIR, CONFIG
+
+logger = setup_logger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-FRAMES_ROOT = os.path.join("data_lake", "cv_frames")
-OUTPUT_DIR = os.path.join("data_lake", "cv_dataset", "upload_to_roboflow")
-FRAMES_PER_VIDEO = 11  # ~11 frames × 46 videos ≈ 506 frames total
+FRAMES_ROOT = DATA_LAKE_DIR / "cv_frames"
+OUTPUT_DIR = DATA_LAKE_DIR / "cv_dataset" / "upload_to_roboflow"
+FRAMES_PER_VIDEO = CONFIG.get("cv_frames", {}).get("frames_per_video", 11)  # ~11 frames × 46 videos ≈ 506 frames total
+SEASONS = CONFIG.get("seasons", ["2023", "2024"])
 
 random.seed(42)  # Reproducible selection
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def select_frames():
-    print("======================================================")
-    print("   ApexHunter - Training Frame Selector")
-    print("======================================================\n")
+def select_frames() -> None:
+    logger.info("======================================================")
+    logger.info("   ApexHunter - Training Frame Selector")
+    logger.info("======================================================")
     
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     total_selected = 0
     
-    for year in ["2023", "2024"]:
-        year_dir = os.path.join(FRAMES_ROOT, year)
-        if not os.path.isdir(year_dir):
-            print(f"[WARN] {year_dir} not found. Skipping.")
+    for year in SEASONS:
+        year_str = str(year)
+        year_dir = FRAMES_ROOT / year_str
+        if not year_dir.is_dir():
+            logger.warning(f"{year_dir} not found. Skipping.")
             continue
         
-        video_dirs = sorted([
-            d for d in os.listdir(year_dir) 
-            if os.path.isdir(os.path.join(year_dir, d))
-        ])
+        video_dirs = sorted([d for d in year_dir.iterdir() if d.is_dir()])
         
-        print(f"[INFO] Year {year}: {len(video_dirs)} track folders found.\n")
+        logger.info(f"Year {year_str}: {len(video_dirs)} track folders found.")
         
-        for video_name in video_dirs:
-            video_frame_dir = os.path.join(year_dir, video_name)
-            all_frames = sorted(glob.glob(os.path.join(video_frame_dir, "*.jpg")))
+        for video_dir in video_dirs:
+            video_name = video_dir.name
+            all_frames = sorted(video_dir.glob("*.jpg"))
             
             if len(all_frames) == 0:
-                print(f"  [SKIP] {video_name}: No frames found.")
+                logger.info(f"SKIP - {video_name}: No frames found.")
                 continue
             
             # Strategy: Pick frames evenly spread across the entire video
@@ -65,21 +64,21 @@ def select_frames():
             step = max(1, len(all_frames) // FRAMES_PER_VIDEO)
             selected = all_frames[::step][:FRAMES_PER_VIDEO]
             
-            print(f"  {video_name}: {len(all_frames)} total → selected {len(selected)} frames")
+            logger.info(f"{video_name}: {len(all_frames)} total → selected {len(selected)} frames")
             
             for frame_path in selected:
-                frame_basename = os.path.basename(frame_path)
+                frame_basename = frame_path.name
                 # Prefix with year and track to make filenames unique
-                new_name = f"{year}_{video_name}_{frame_basename}"
-                dest = os.path.join(OUTPUT_DIR, new_name)
-                shutil.copy2(frame_path, dest)
+                new_name = f"{year_str}_{video_name}_{frame_basename}"
+                dest = OUTPUT_DIR / new_name
+                shutil.copy2(str(frame_path), str(dest))
                 total_selected += 1
     
-    print(f"\n======================================================")
-    print(f"  [DONE] Selected {total_selected} frames for annotation.")
-    print(f"         Upload folder: {os.path.abspath(OUTPUT_DIR)}")
-    print(f"======================================================")
-    print(f"\n  Next step: Upload this entire folder to Roboflow!")
+    logger.info("======================================================")
+    logger.info(f"  [DONE] Selected {total_selected} frames for annotation.")
+    logger.info(f"         Upload folder: {OUTPUT_DIR.resolve()}")
+    logger.info("======================================================")
+    logger.info("  Next step: Upload this entire folder to Roboflow!")
 
 if __name__ == "__main__":
     select_frames()

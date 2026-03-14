@@ -10,10 +10,13 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Linter Cache
+.ruff_cache/
+
 # Project Specific Data (Large Files)
 data_lake/
-apexhunter_output/
 cache/
+models/
 
 # IDE / System Files
 .vscode/
@@ -23,5 +26,3 @@ Thumbs.db
 
 # Sensitive Information (Placeholder for future)
 .env
-*.json
-!requirements.txt
