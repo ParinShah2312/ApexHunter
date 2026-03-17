@@ -11,9 +11,9 @@
     "hit_threshold": 130,
     "near_threshold": 250,
     "alpha": 0.5,
-    "left_wheel_x": 250,
-    "right_wheel_x": 1030,
-    "wheel_y": 600
+    "left_wheel_x_pct": 0.18,
+    "right_wheel_x_pct": 0.85,
+    "wheel_y_pct": 0.60
   },
   "satellite": {
     "image_width": 1280,

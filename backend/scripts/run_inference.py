@@ -46,11 +46,11 @@ inf_config = CONFIG.get("inference", {})
 HIT_THRESHOLD = inf_config.get("hit_threshold", 130)    # Distance < 130px = Hitting apex
 NEAR_THRESHOLD = inf_config.get("near_threshold", 250)   # Distance < 250px = Near apex
 
-# Screen coordinates for the front wheels (approximate based on F1 T-cam)
-# These may need slight tuning depending on the exact video resolution
-LEFT_WHEEL_X = inf_config.get("left_wheel_x", 250)
-RIGHT_WHEEL_X = inf_config.get("right_wheel_x", 1030)
-WHEEL_Y = inf_config.get("wheel_y", 600)
+# Front wheel reference point positions as percentage of frame dimensions.
+# Tuned visually to sit exactly on the front tyres under the F1 T-cam view.
+LEFT_WHEEL_X_PCT = inf_config.get("left_wheel_x_pct", 0.18)
+RIGHT_WHEEL_X_PCT = inf_config.get("right_wheel_x_pct", 0.85)
+WHEEL_Y_PCT = inf_config.get("wheel_y_pct", 0.60)
 
 # Transparency for HUD blending
 ALPHA = inf_config.get("alpha", 0.5)
@@ -122,14 +122,10 @@ def process_video(input_video_path: Path) -> None:
     csv_writer = csv.writer(csv_file)
     csv_writer.writerow(['frame_number', 'timestamp_sec', 'distance_px', 'status', 'has_curb'])
     
-    # The reference points for the left and right wheels
-    left_wheel = (int(width * (LEFT_WHEEL_X / 1280)), int(height * (WHEEL_Y / 720))) if LEFT_WHEEL_X <= 1280 else (LEFT_WHEEL_X, WHEEL_Y)
-    right_wheel = (int(width * (RIGHT_WHEEL_X / 1280)), int(height * (WHEEL_Y / 720))) if RIGHT_WHEEL_X <= 1280 else (RIGHT_WHEEL_X, WHEEL_Y)
-    # the above ensures coordinates adapt if config was set for 720p but video is 1080p, as a safeguard
-    
-    # Actually, simplest is to just use config values directly. Adjust manual override if needed.
-    left_wheel = (LEFT_WHEEL_X, WHEEL_Y)
-    right_wheel = (RIGHT_WHEEL_X, WHEEL_Y)
+    # The reference points for the left and right front tyres
+    # Calculated as percentages of frame dimensions so they adapt to any resolution
+    left_wheel = (int(width * LEFT_WHEEL_X_PCT), int(height * WHEEL_Y_PCT))
+    right_wheel = (int(width * RIGHT_WHEEL_X_PCT), int(height * WHEEL_Y_PCT))
     center_x = width // 2
     
     logger.info(f"Starting inference on {total_frames} frames...")
