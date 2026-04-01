@@ -1,0 +1,13 @@
+ApexHunter Test Suite — Timing Baseline (before refactor)
+==========================================================
+Recorded: 2026-04-01
+
+test_mistakes_features.py       : Ran 16 tests in 1.92s
+test_mistakes_model.py          : Ran  7 tests in 61.05s
+test_mistakes_pipeline.py       : Ran 20 tests in 355.00s
+test_clean_telemetry.py         : Ran 20 tests in 3.77s
+test_inference_geometry.py      : Ran 14 tests in 0.59s
+test_select_training_frames.py  : Ran  7 tests in 1.86s
+
+Total (sequential):             ~424.19s  (7+ minutes)
+Total test count:               84 tests
