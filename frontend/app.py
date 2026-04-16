@@ -63,7 +63,6 @@ with tab_telemetry:
         df_driver=sel.df_driver,
         driver_name=sel.driver_name,
         driver_number=sel.driver_number,
-        beginner_mode=sel.beginner_mode,
     )
 
 with tab_track:

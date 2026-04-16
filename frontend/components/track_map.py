@@ -56,4 +56,4 @@ def render_track_map(
         margin=dict(t=40, b=40, l=40, r=40),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')

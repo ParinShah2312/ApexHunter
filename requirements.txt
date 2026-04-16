@@ -10,3 +10,5 @@ streamlit
 plotly
 torch
 ruff
+scikit-learn
+pyarrow

@@ -15,23 +15,12 @@ from plotly.subplots import make_subplots
 from components.data_loader import downsample
 
 
-def _get_labels(beginner_mode: bool) -> Dict[str, str]:
-    """Returns display labels based on beginner mode setting.
-
-    Args:
-        beginner_mode: If True, returns simplified labels for non-technical users.
+def _get_labels() -> Dict[str, str]:
+    """Returns display labels for telemetry metrics.
 
     Returns:
         Dictionary mapping metric keys to display strings.
     """
-    if beginner_mode:
-        return {
-            "speed": "Vehicle Speed",
-            "throttle": "Gas Pedal",
-            "brake": "Brakes Applied",
-            "rpm": "Engine Revs",
-            "gear": "Current Gear",
-        }
     return {
         "speed": "Speed (km/h)",
         "throttle": "Throttle (%)",
@@ -83,8 +72,8 @@ def _render_time_scrubber(df_driver: pd.DataFrame) -> Tuple[pd.DataFrame, float]
     return df_filtered, scrub
 
 
-def _render_metrics(df_filtered: pd.DataFrame, total_seconds: float, beginner_mode: bool) -> None:
-    """Renders the Session Time, Corner Score, and Top Speed metric cards.
+def _render_metrics(df_filtered: pd.DataFrame, total_seconds: float) -> None:
+    """Renders the Session Time and Top Speed metric cards.
 
     Note: Metrics always use the FULL filtered dataset (no downsampling)
     to ensure accuracy.
@@ -92,7 +81,6 @@ def _render_metrics(df_filtered: pd.DataFrame, total_seconds: float, beginner_mo
     Args:
         df_filtered: DataFrame filtered to the scrub time range.
         total_seconds: Current scrub position in seconds.
-        beginner_mode: Whether to use simplified labels.
     """
     hrs, remainder = divmod(total_seconds, 3600)
     mins, secs = divmod(remainder, 60)
@@ -100,21 +88,12 @@ def _render_metrics(df_filtered: pd.DataFrame, total_seconds: float, beginner_mo
     time_str = f"{int(hrs):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
 
     st.markdown("---")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     col1.metric("Session Time", time_str)
 
     top_speed = float(df_filtered["Speed"].max())
-    col3.metric("Top Speed (km/h)" if not beginner_mode else "Max Speed", f"{top_speed:.1f}")
-
-    # Perfect Corner Score: % of time NOT overlapping brake + throttle
-    overlap = (df_filtered["Brake"] > 0) & (df_filtered["Throttle"] > 0)
-    raw_score = 100 - (overlap.sum() / len(df_filtered) * 100) if len(df_filtered) > 0 else 100
-    corner_score = float(np.clip(raw_score, 0, 100))
-
-    with col2:
-        st.metric("Perfect Corner Score", f"{corner_score:.1f}")
-        st.progress(int(corner_score), text="Apex Accuracy")
+    col2.metric("Top Speed (km/h)", f"{top_speed:.1f}")
 
     st.markdown("---")
 
@@ -123,7 +102,6 @@ def render_telemetry(
     df_driver: pd.DataFrame,
     driver_name: str,
     driver_number: str,
-    beginner_mode: bool,
 ) -> Optional[Tuple[pd.DataFrame, Dict[str, str], str]]:
     """Main entry point: renders the telemetry playback section.
 
@@ -131,7 +109,6 @@ def render_telemetry(
         df_driver: DataFrame filtered to a single driver.
         driver_name: Human-readable driver name.
         driver_number: Driver's car number.
-        beginner_mode: Whether to use simplified labels.
 
     Returns:
         Tuple of (filtered DataFrame, labels dict, hover template) for track map,
@@ -151,7 +128,7 @@ def render_telemetry(
             "before cars are released. You'll see a gap before the first recorded points."
         )
 
-    labels = _get_labels(beginner_mode)
+    labels = _get_labels()
     df_filtered, total_seconds = _render_time_scrubber(df_driver)
 
     if df_filtered.empty:
@@ -160,7 +137,7 @@ def render_telemetry(
         return None
 
     # Metrics use FULL data for accuracy
-    _render_metrics(df_filtered, total_seconds, beginner_mode)
+    _render_metrics(df_filtered, total_seconds)
 
     # Downsample for chart rendering performance only
     df_chart = downsample(df_filtered)
@@ -205,7 +182,7 @@ def render_telemetry(
     fig.update_layout(height=650, showlegend=False, margin=dict(t=40, b=40, l=40, r=40))
     fig.update_xaxes(title_text="Time (s)", row=3, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     # Return filtered data (full, not downsampled) for track map
     return df_filtered, labels, hover_tpl

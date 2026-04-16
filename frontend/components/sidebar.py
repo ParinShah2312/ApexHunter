@@ -23,7 +23,6 @@ class SidebarSelections:
     session_label: str
     driver_number: str
     driver_name: str
-    beginner_mode: bool
     df_driver: pd.DataFrame
 
 
@@ -123,9 +122,6 @@ def render_sidebar() -> SidebarSelections:
     driver_number = selected_driver_label.split(" (#")[1].replace(")", "")
     driver_name = selected_driver_label.split(" (#")[0]
 
-    # ── Beginner Mode ─────────────────────────────────────────────────────
-    beginner_mode = st.sidebar.toggle("Beginner Mode", value=False, key="sel_beginner")
-
     # ── Footer ────────────────────────────────────────────────────────────
     st.sidebar.markdown("---")
     st.sidebar.markdown("ApexHunter v1.0 | Dev: Parin Shah | ID: 23001091")
@@ -138,6 +134,5 @@ def render_sidebar() -> SidebarSelections:
         session_label=selected_session,
         driver_number=driver_number,
         driver_name=driver_name,
-        beginner_mode=beginner_mode,
         df_driver=df_driver,
     )
