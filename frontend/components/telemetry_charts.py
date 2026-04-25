@@ -1,10 +1,10 @@
 """
 ApexHunter Frontend - Telemetry Charts
-Renders the metrics row and the multi-subplot telemetry chart.
-Uses downsampling for smooth chart rendering with large datasets.
+Renders the metrics row, time scrubber, and the five-panel telemetry chart.
+Supports compare driver overlay.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,174 +15,218 @@ from plotly.subplots import make_subplots
 from components.data_loader import downsample
 
 
-def _get_labels() -> Dict[str, str]:
-    """Returns display labels for telemetry metrics.
-
-    Returns:
-        Dictionary mapping metric keys to display strings.
-    """
-    return {
-        "speed": "Speed (km/h)",
-        "throttle": "Throttle (%)",
-        "brake": "Brake",
-        "rpm": "RPM",
-        "gear": "nGear",
-    }
-
-
-def _get_time_col(df: pd.DataFrame) -> str:
-    """Determines the best time column to use for time-based operations."""
-    if "SessionTime" in df.columns and not df["SessionTime"].isnull().all():
-        return "SessionTime"
-    return "Time"
-
-
-def _render_time_scrubber(df_driver: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
-    """Renders the time scrubber slider and returns filtered data + total seconds.
-
-    Args:
-        df_driver: DataFrame filtered to a single driver.
-
-    Returns:
-        Tuple of (filtered DataFrame up to scrub point, scrub time in seconds).
-    """
-    time_col = _get_time_col(df_driver)
-
-    st.markdown("### Telemetry Playback")
-
-    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
-        min_t = df_driver[time_col].dt.total_seconds().min()
-        max_t = df_driver[time_col].dt.total_seconds().max()
-        scrub = st.slider(
-            "Scrub Session Time",
-            min_value=float(min_t), max_value=float(max_t),
-            value=float(max_t), format="%.1f s",
-        )
-        df_filtered = df_driver[df_driver[time_col].dt.total_seconds() <= scrub].copy()
-    else:
-        min_t = float(df_driver[time_col].min())
-        max_t = float(df_driver[time_col].max())
-        scrub = st.slider(
-            "Scrub Session",
-            min_value=min_t, max_value=max_t,
-            value=max_t, format="%.1f",
-        )
-        df_filtered = df_driver[df_driver[time_col] <= scrub].copy()
-
-    return df_filtered, scrub
-
-
-def _render_metrics(df_filtered: pd.DataFrame, total_seconds: float) -> None:
-    """Renders the Session Time and Top Speed metric cards.
-
-    Note: Metrics always use the FULL filtered dataset (no downsampling)
-    to ensure accuracy.
-
-    Args:
-        df_filtered: DataFrame filtered to the scrub time range.
-        total_seconds: Current scrub position in seconds.
-    """
-    hrs, remainder = divmod(total_seconds, 3600)
-    mins, secs = divmod(remainder, 60)
-    ms = (secs - int(secs)) * 1000
-    time_str = f"{int(hrs):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
-
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-
-    col1.metric("Session Time", time_str)
-
-    top_speed = float(df_filtered["Speed"].max())
-    col2.metric("Top Speed (km/h)", f"{top_speed:.1f}")
-
-    st.markdown("---")
-
-
 def render_telemetry(
     df_driver: pd.DataFrame,
     driver_name: str,
     driver_number: str,
-) -> Optional[Tuple[pd.DataFrame, Dict[str, str], str]]:
+    df_compare: Optional[pd.DataFrame] = None,
+    compare_number: Optional[str] = None,
+) -> Optional[Tuple[pd.DataFrame, str]]:
     """Main entry point: renders the telemetry playback section.
 
-    Args:
-        df_driver: DataFrame filtered to a single driver.
-        driver_name: Human-readable driver name.
-        driver_number: Driver's car number.
-
     Returns:
-        Tuple of (filtered DataFrame, labels dict, hover template) for track map,
-        or None if no data is available.
+        Tuple of (filtered DataFrame, hover template) for use by the track map,
+        or None if empty.
     """
     if df_driver.empty:
         st.warning(f"No telemetry data found for driver {driver_name} (#{driver_number}).")
         st.stop()
         return None
 
-    # Info expander
-    with st.expander("ℹ️ Why is there a gap in the telemetry data early in the session?"):
-        st.write(
-            "**Telemetry timestamps measure from when the official session window starts.** "
-            "In a Race, the actual 'lights out' often occurs ~1 hour into the official "
-            "SessionTime (formation lap, buildup, etc.). In Qualifying, data begins slightly "
-            "before cars are released. You'll see a gap before the first recorded points."
+    # ── Metric Cards Row ──────────────────────────────────────────────────
+    scrub_val = st.session_state.get("scrub_seconds", 0.0)
+    hrs, remainder = divmod(scrub_val, 3600)
+    mins, secs = divmod(remainder, 60)
+    ms = (secs - int(secs)) * 1000
+    time_str = f"{int(hrs):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+
+    top_speed = float(df_driver["Speed"].max())
+
+    overlap_pct = 0.0
+    if len(df_driver) > 0:
+        overlap_pct = (
+            ((df_driver["Brake"] > 0) & (df_driver["Throttle"] > 0)).sum()
+            / len(df_driver)
+            * 100
         )
 
-    labels = _get_labels()
-    df_filtered, total_seconds = _render_time_scrubber(df_driver)
+    mc1, mc2, mc3 = st.columns(3)
+    with mc1:
+        st.metric("Session Time", time_str)
+    with mc2:
+        st.metric("Top Speed", f"{top_speed:.1f} km/h")
+    with mc3:
+        st.metric("Brake Overlap", f"{overlap_pct:.1f}%")
+        st.caption("lower is better")
+
+    # ── Time Scrubber ─────────────────────────────────────────────────────
+    time_col = "SessionTime" if ("SessionTime" in df_driver.columns and not df_driver["SessionTime"].isnull().all()) else "Time"
+
+    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
+        min_t = float(df_driver[time_col].dt.total_seconds().min())
+        max_t = float(df_driver[time_col].dt.total_seconds().max())
+    else:
+        min_t = float(df_driver[time_col].min())
+        max_t = float(df_driver[time_col].max())
+
+    def _sync_scrub():
+        st.session_state["scrub_seconds"] = st.session_state["telemetry_scrub_seconds"]
+
+    # Clamp scrub value to valid range
+    scrub_init = st.session_state.get("scrub_seconds", max_t)
+    scrub_init = max(min_t, min(scrub_init, max_t))
+
+    scrub = st.slider(
+        "Session Time",
+        min_value=min_t,
+        max_value=max_t,
+        value=scrub_init,
+        format="%.1f s",
+        key="telemetry_scrub_seconds",
+        on_change=_sync_scrub,
+    )
+
+    # Filter to scrub position
+    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
+        df_filtered = df_driver[df_driver[time_col].dt.total_seconds() <= scrub].copy()
+    else:
+        df_filtered = df_driver[df_driver[time_col] <= scrub].copy()
 
     if df_filtered.empty:
         st.warning("No data in selected time range.")
-        st.stop()
         return None
 
-    # Metrics use FULL data for accuracy
-    _render_metrics(df_filtered, total_seconds)
-
-    # Downsample for chart rendering performance only
+    # ── Build Five-Panel Chart ────────────────────────────────────────────
     df_chart = downsample(df_filtered)
-    time_col = _get_time_col(df_chart)
 
-    x_data = (
-        df_chart[time_col].dt.total_seconds()
-        if pd.api.types.is_timedelta64_dtype(df_chart[time_col])
-        else df_chart[time_col]
-    )
-
-    # ── Build subplots ────────────────────────────────────────────────────
-    st.subheader(f"Telemetry Data - {driver_name} (#{driver_number})")
+    if pd.api.types.is_timedelta64_dtype(df_chart[time_col]):
+        x_data = df_chart[time_col].dt.total_seconds()
+    else:
+        x_data = df_chart[time_col]
 
     fig = make_subplots(
-        rows=3, cols=1,
+        rows=5,
+        cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        subplot_titles=(labels["speed"], labels["throttle"], labels["brake"]),
+        vertical_spacing=0.04,
+        subplot_titles=("Speed (km/h)", "Throttle %", "Brake %", "Gear", "RPM"),
     )
 
-    hover_tpl = (
-        "At this moment, the car is traveling at %{customdata[0]:.1f} km/h "
-        "in %{customdata[1]} gear.<extra></extra>"
-    )
-    custom_data = np.stack((df_chart["Speed"], df_chart["nGear"]), axis=-1)
+    # Primary driver traces  (row, column, color, fillcolor, fill, mode, line_shape, hovertemplate)
+    trace_configs = [
+        (1, "Speed",    "#00d4ff", "rgba(0,212,255,0.09)", "tozeroy", "lines", None,
+         "At <b>%{x:.1f}s</b>, the car was travelling at <b>%{y:.1f} km/h</b><extra></extra>"),
+        (2, "Throttle", "#00ff88", "rgba(0,255,136,0.09)", "tozeroy", "lines", None,
+         "At <b>%{x:.1f}s</b>, throttle was at <b>%{y:.0f}%</b><extra></extra>"),
+        (3, "Brake",    "#ff3a3a", "rgba(255,58,58,0.09)", "tozeroy", "lines", None,
+         "At <b>%{x:.1f}s</b>, brake pressure was <b>%{y:.0f}%</b><extra></extra>"),
+        (4, "nGear",    "#6b7890", None, None, "lines", "hv",
+         "At <b>%{x:.1f}s</b>, the car was in <b>gear %{y:.0f}</b><extra></extra>"),
+        (5, "RPM",      "#a855f7", None, None, "lines", None,
+         "At <b>%{x:.1f}s</b>, the engine was at <b>%{y:,.0f} RPM</b><extra></extra>"),
+    ]
 
-    for row, (y_col, color) in enumerate(
-        [("Speed", "cyan"), ("Throttle", "green"), ("Brake", "red")], start=1
-    ):
+    for row, col_name, color, fillcolor, fill, mode, line_shape, htpl in trace_configs:
         fig.add_trace(
             go.Scatter(
-                x=x_data, y=df_chart[y_col],
-                name=labels.get(y_col.lower(), y_col),
-                line=dict(color=color),
-                customdata=custom_data,
-                hovertemplate=hover_tpl,
+                x=x_data,
+                y=df_chart[col_name],
+                mode=mode,
+                fill=fill,
+                line=dict(color=color, shape=line_shape) if line_shape else dict(color=color),
+                fillcolor=fillcolor,
+                name=f"{col_name} #{driver_number}",
+                hovertemplate=htpl,
             ),
-            row=row, col=1,
+            row=row,
+            col=1,
         )
 
-    fig.update_layout(height=650, showlegend=False, margin=dict(t=40, b=40, l=40, r=40))
-    fig.update_xaxes(title_text="Time (s)", row=3, col=1)
+    # Compare driver traces
+    if df_compare is not None and compare_number is not None:
+        # Filter compare to same time window
+        if pd.api.types.is_timedelta64_dtype(df_compare[time_col]):
+            df_comp_filt = df_compare[df_compare[time_col].dt.total_seconds() <= scrub].copy()
+        else:
+            df_comp_filt = df_compare[df_compare[time_col] <= scrub].copy()
+
+        if not df_comp_filt.empty:
+            df_comp_chart = downsample(df_comp_filt)
+
+            if pd.api.types.is_timedelta64_dtype(df_comp_chart[time_col]):
+                x_comp = df_comp_chart[time_col].dt.total_seconds()
+            else:
+                x_comp = df_comp_chart[time_col]
+
+            comp_configs = [
+                (1, "Speed",    "rgba(0,212,255,0.53)", "lines", None,
+                 "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:.1f} km/h</b><extra></extra>"),
+                (2, "Throttle", "rgba(0,255,136,0.53)", "lines", None,
+                 "[Compare] At <b>%{x:.1f}s</b> — throttle <b>%{y:.0f}%</b><extra></extra>"),
+                (3, "Brake",    "rgba(255,58,58,0.53)", "lines", None,
+                 "[Compare] At <b>%{x:.1f}s</b> — brake <b>%{y:.0f}%</b><extra></extra>"),
+                (4, "nGear",    "rgba(107,120,144,0.53)", "lines", "hv",
+                 "[Compare] At <b>%{x:.1f}s</b> — <b>gear %{y:.0f}</b><extra></extra>"),
+                (5, "RPM",      "rgba(168,85,247,0.53)", "lines", None,
+                 "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:,.0f} RPM</b><extra></extra>"),
+            ]
+
+            for row, col_name, color, mode, line_shape, htpl in comp_configs:
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_comp,
+                        y=df_comp_chart[col_name],
+                        mode=mode,
+                        opacity=0.6,
+                        line=dict(color=color, dash="dash", shape=line_shape) if line_shape else dict(color=color, dash="dash"),
+                        name=f"{col_name} #{compare_number}",
+                        hovertemplate=htpl,
+                    ),
+                    row=row,
+                    col=1,
+                )
+
+    # Scrubber vertical line on all five subplots
+    scrub_val = st.session_state.get("scrub_seconds", float(max_t))
+    shapes = []
+    for row in range(1, 6):
+        xref = "x" if row == 1 else f"x{row}"
+        yref = "y domain" if row == 1 else f"y{row} domain"
+        shapes.append(
+            dict(
+                type="line",
+                x0=scrub_val,
+                x1=scrub_val,
+                y0=0,
+                y1=1,
+                xref=xref,
+                yref=yref,
+                line=dict(color="rgba(255,255,255,0.4)", width=1, dash="dot"),
+            )
+        )
+
+    fig.update_layout(
+        shapes=shapes,
+        height=580,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0f1217",
+        font=dict(color="#6b7890", size=11),
+        showlegend=True if df_compare is not None else False,
+        margin=dict(t=40, b=20, l=50, r=20),
+    )
+
+    # Style grid lines for all axes
+    for i in range(1, 6):
+        xaxis_key = f"xaxis{i}" if i > 1 else "xaxis"
+        yaxis_key = f"yaxis{i}" if i > 1 else "yaxis"
+        fig.update_layout(
+            **{
+                xaxis_key: dict(gridcolor="rgba(255,255,255,0.04)", zerolinecolor="rgba(255,255,255,0.07)"),
+                yaxis_key: dict(gridcolor="rgba(255,255,255,0.04)", zerolinecolor="rgba(255,255,255,0.07)"),
+            }
+        )
 
     st.plotly_chart(fig, width='stretch')
 
-    # Return filtered data (full, not downsampled) for track map
-    return df_filtered, labels, hover_tpl
+    hover_template = "Speed: %{y:.1f} km/h<extra></extra>"
+    return (df_filtered, hover_template)

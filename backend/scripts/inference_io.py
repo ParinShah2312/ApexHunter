@@ -47,7 +47,7 @@ def create_video_writer(
     Returns:
         An opened cv2.VideoWriter.
     """
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
     return cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
 
