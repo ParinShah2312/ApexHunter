@@ -18,6 +18,7 @@ def render_ai_analysis(
     meta: Optional[dict],
     df_session: pd.DataFrame,
     scrub_seconds: float,
+    tyre_data: Optional[dict] = None,
 ) -> None:
     """Renders the AI Analysis tab content."""
     col_left, col_right = st.columns(2)
@@ -148,27 +149,188 @@ def render_ai_analysis(
                 )
                 st.plotly_chart(fig_cv, width='stretch')
 
-    # ── RIGHT COLUMN: LSTM Placeholder ────────────────────────────────────
+    # ── RIGHT COLUMN: LSTM Tyre Cliff ─────────────────────────────────────
     with col_right:
         st.markdown("**LSTM TYRE CLIFF PREDICTOR**")
-        st.info("Coming in Phase 2. Run predict_cliff.py once the LSTM model is trained.")
 
-        fig_placeholder = go.Figure()
-        fig_placeholder.add_annotation(
-            text="LSTM output will appear here",
-            showarrow=False,
-            font=dict(color="#3a4558", size=14),
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-        )
-        fig_placeholder.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="#0f1217",
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=300,
-            margin=dict(t=10, b=10, l=10, r=10),
-        )
-        st.plotly_chart(fig_placeholder, width='stretch')
+        if tyre_data is None:
+            st.warning(
+                "No tyre prediction found for this session and driver.\n\n"
+                "**Step 1 — Train the model** (only needed once):\n"
+                "```\npython backend/scripts/train_lstm.py\n```\n\n"
+                "**Step 2 — Run prediction**:\n"
+                "```\npython backend/scripts/predict_cliff.py "
+                "--session data_lake/clean_data/<file>.parquet "
+                "--driver <code>\n```"
+            )
+
+            fig_placeholder = go.Figure()
+            fig_placeholder.add_annotation(
+                text="LSTM output will appear here",
+                showarrow=False,
+                font=dict(color="#3a4558", size=14),
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+            )
+            fig_placeholder.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="#0f1217",
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                height=300,
+                margin=dict(t=10, b=10, l=10, r=10),
+            )
+            st.plotly_chart(fig_placeholder, width='stretch')
+        else:
+            # ── Stint selector ────────────────────────────────────────────
+            stints = tyre_data.get("stints", [])
+            if len(stints) == 0:
+                st.warning("Prediction file exists but contains no stint data.")
+            else:
+                stint_options = [
+                    f"Stint {s['stint_index'] + 1} ({s['n_laps']} laps)"
+                    for s in stints
+                ]
+                selected_stint_label = st.selectbox(
+                    "Select stint", options=stint_options, key="tyre_stint_selector"
+                )
+                selected_idx = stint_options.index(selected_stint_label)
+                stint = stints[selected_idx]
+
+                n_laps = stint["n_laps"]
+                lap_nums = list(range(1, n_laps + 1))
+                actual = stint["actual_laps"]
+                predicted = stint["predicted_laps"]
+                upper = stint["confidence_upper"]
+                lower = stint["confidence_lower"]
+                cliff_lap = stint.get("cliff_lap")
+
+                # Color gradient for actual line: green → red
+                def lap_color(i: int, total: int) -> str:
+                    ratio = i / max(1, total - 1)
+                    r = int(ratio * 255)
+                    g = int((1 - ratio) * 255)
+                    return f"rgb({r},{g},100)"
+
+                # The backend JSON now directly provides lap times instead of speeds
+                actual_time = actual
+                predicted_time = predicted
+                upper_time = upper
+                lower_time = lower
+
+                fig = go.Figure()
+
+                # Actual pace as gradient line segments
+                for i in range(len(actual_time) - 1):
+                    fig.add_trace(go.Scatter(
+                        x=[lap_nums[i], lap_nums[i + 1]],
+                        y=[actual_time[i], actual_time[i + 1]],
+                        mode="lines",
+                        line=dict(color=lap_color(i, len(actual_time)), width=2.5),
+                        showlegend=(i == 0),
+                        name="Actual lap time" if i == 0 else None,
+                        hovertemplate=f"Lap {lap_nums[i]}: %{{y:.2f}} s<extra></extra>",
+                    ))
+
+                # Predicted trace (skip None values)
+                pred_x = [lap_nums[i] for i, v in enumerate(predicted_time) if v is not None]
+                pred_y = [v for v in predicted_time if v is not None]
+                if pred_x:
+                    fig.add_trace(go.Scatter(
+                        x=pred_x, y=pred_y,
+                        mode="lines",
+                        line=dict(color="#a855f7", width=1.5, dash="dash"),
+                        name="LSTM prediction",
+                        hovertemplate="Predicted: %{y:.2f} s<extra></extra>",
+                    ))
+
+                # Confidence band
+                upper_x = [lap_nums[i] for i, v in enumerate(upper_time) if v is not None]
+                upper_y = [v for v in upper_time if v is not None]
+                lower_x = [lap_nums[i] for i, v in enumerate(lower_time) if v is not None]
+                lower_y = [v for v in lower_time if v is not None]
+                if upper_x and lower_x:
+                    fig.add_trace(go.Scatter(
+                        x=upper_x + lower_x[::-1],
+                        y=upper_y + lower_y[::-1],
+                        fill="toself",
+                        fillcolor="rgba(168,85,247,0.10)",
+                        line=dict(color="rgba(0,0,0,0)"),
+                        hoverinfo="skip",
+                        showlegend=False,
+                        name="confidence_band",
+                    ))
+
+                # Cliff vertical line
+                if cliff_lap is not None:
+                    cliff_x = lap_nums[cliff_lap] if cliff_lap < len(lap_nums) else lap_nums[-1]
+                    fig.add_vline(
+                        x=cliff_x,
+                        line=dict(color="#ff3a3a", width=1.5, dash="dot"),
+                        annotation_text=f"CLIFF LAP {cliff_lap + 1}",
+                        annotation_position="top right",
+                        annotation_font=dict(color="#ff3a3a", size=10),
+                    )
+
+                fig.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="#0d1520",
+                    height=300,
+                    margin=dict(t=20, b=30, l=50, r=20),
+                    xaxis=dict(
+                        title="Lap in stint",
+                        tickfont=dict(color="#6b7890"),
+                        gridcolor="rgba(255,255,255,0.04)",
+                    ),
+                    yaxis=dict(
+                        title="Lap Time (s)",
+                        tickfont=dict(color="#6b7890"),
+                        gridcolor="rgba(255,255,255,0.04)",
+                    ),
+                    legend=dict(
+                        bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="#6b7890", size=11),
+                    ),
+                    showlegend=True,
+                )
+                st.plotly_chart(fig, width='stretch')
+
+                # Stat cards - 2x2 grid for better readability
+                c1, c2 = st.columns(2)
+                with c1:
+                    cliff_label = str(cliff_lap + 1) if cliff_lap is not None else "—"
+                    st.metric(
+                        "Predicted Cliff",
+                        f"Lap {cliff_label}" if cliff_lap is not None else "—",
+                    )
+                with c2:
+                    lr = stint.get("laps_remaining")
+                    st.metric("Laps Remaining", str(lr) if lr is not None else "—")
+                    
+                st.write("") # small spacing
+                c3, c4 = st.columns(2)
+                with c3:
+                    valid_actuals = [t for t in actual_time if t is not None]
+                    current_pace = f"{valid_actuals[-1]:.2f}s" if valid_actuals else "—"
+                    st.metric("Current Pace", current_pace)
+                with c4:
+                    valid_preds = [t for t in predicted_time if t is not None]
+                    if valid_actuals and valid_preds:
+                        proj_pace = valid_preds[-1]
+                        diff = proj_pace - valid_actuals[-1]
+                        color = "normal" if diff <= 0 else "inverse"
+                        st.metric("Proj. End Pace", f"{proj_pace:.2f}s", f"{diff:+.2f}s", delta_color=color)
+                    else:
+                        st.metric("Proj. End Pace", "—")
+
+                # Model details expander
+                with st.expander("Model details"):
+                    st.markdown(f"""
+- **Session:** {tyre_data.get('session_file', '—')}
+- **Driver:** {tyre_data.get('driver', '—')}
+- **Total stints:** {len(stints)}
+- **Generated:** {tyre_data.get('timestamp', '—')}
+                    """)
+

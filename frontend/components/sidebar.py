@@ -19,6 +19,7 @@ from config import (
     PROCESSED_VIDEO_DIR,
     SESSION_LABEL_MAP,
     RACING_LINES_DIR,
+    TYRE_PREDICTIONS_DIR,
 )
 from components.data_loader import get_event_schedule, load_session_data, load_mistake_data
 
@@ -38,6 +39,7 @@ class SidebarSelections:
     compare_driver_number: Optional[str]
     df_compare: Optional[pd.DataFrame]
     racing_line_path: str
+    tyre_prediction_path: str
     df_full: pd.DataFrame
 
 
@@ -160,6 +162,8 @@ def render_sidebar() -> SidebarSelections:
     mistake_parquet_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet")
     mistake_meta_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json")
     racing_line_json = RACING_LINES_DIR / f"{output_stem}_racing_line.json"
+    tyre_json = TYRE_PREDICTIONS_DIR / f"{output_stem}_tyre.json"
+    tyre_prediction_path = str(tyre_json)
 
     # ── AI Models Status ──────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -188,8 +192,12 @@ def render_sidebar() -> SidebarSelections:
         unsafe_allow_html=True,
     )
 
-    # LSTM Tyre: always gray
-    st.sidebar.markdown(f"{gray_dot} LSTM Tyre", unsafe_allow_html=True)
+    # LSTM Tyre Cliff
+    lstm_exists = Path(tyre_prediction_path).exists()
+    st.sidebar.markdown(
+        f"{green_dot if lstm_exists else gray_dot} LSTM Tyre Cliff",
+        unsafe_allow_html=True,
+    )
 
     # A* Racing Line
     astar_exists = Path(racing_line_json).exists()
@@ -259,5 +267,6 @@ def render_sidebar() -> SidebarSelections:
         compare_driver_number=compare_driver_number,
         df_compare=df_compare,
         racing_line_path=str(racing_line_json),
+        tyre_prediction_path=tyre_prediction_path,
         df_full=df,
     )

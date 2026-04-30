@@ -63,7 +63,6 @@ def load_mistake_data(filepath: str) -> Optional[pd.DataFrame]:
     return pd.read_parquet(filepath)
 
 
-@st.cache_data(show_spinner=False)
 def load_mistake_meta(filepath: str) -> Optional[dict]:
     """Reads the JSON metadata file.
 
@@ -131,7 +130,6 @@ def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
     return sampled
 
 
-@st.cache_data(show_spinner=False)
 def load_racing_line(filepath: str) -> Optional[dict]:
     if not Path(filepath).exists():
         return None
@@ -140,3 +138,15 @@ def load_racing_line(filepath: str) -> Optional[dict]:
             return json.load(f)
     except Exception:
         return None
+
+
+def load_tyre_prediction(filepath: str) -> Optional[dict]:
+    """Load a tyre prediction JSON. Returns None if file does not exist."""
+    if not Path(filepath).exists():
+        return None
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+

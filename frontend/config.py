@@ -59,6 +59,7 @@ MISTAKE_DATA_DIR = PROJECT_ROOT / "data_lake" / "mistake_data"
 PROCESSED_VIDEO_DIR = PROJECT_ROOT / "data_lake" / "processed_video"
 PROCESSED_CSV_DIR = PROJECT_ROOT / "data_lake" / "processed_csv"
 RACING_LINES_DIR = PROJECT_ROOT / "data_lake" / "racing_lines"
+TYRE_PREDICTIONS_DIR = PROJECT_ROOT / "data_lake" / "tyre_predictions"
 
 # ── Team mapping (driver number → team name) ──────────────────────────────────
 TEAM_MAPPING = {

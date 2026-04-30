@@ -153,7 +153,7 @@ from components.telemetry_charts import render_telemetry
 from components.track_map import render_track_map
 from components.cv_feed import render_cv_feed
 from components.ai_analysis import render_ai_analysis
-from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line
+from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line, load_tyre_prediction
 from components.racing_line import render_racing_line
 
 # ── Step 1: Sidebar ──────────────────────────────────────────────────────────
@@ -163,6 +163,7 @@ sel = render_sidebar()
 df_mistakes = load_mistake_data(sel.mistake_parquet_path)
 meta = load_mistake_meta(sel.mistake_meta_path)
 racing_line_data = load_racing_line(sel.racing_line_path)
+tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
 # ── Step 3: Header bar ───────────────────────────────────────────────────────
 render_header_bar(sel, meta)
@@ -267,6 +268,7 @@ with tab3:
         meta=meta,
         df_session=sel.df_driver,
         scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
+        tyre_data=tyre_data,
     )
 
 with tab4:
