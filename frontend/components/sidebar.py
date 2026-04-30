@@ -18,6 +18,7 @@ from config import (
     MISTAKE_DATA_DIR,
     PROCESSED_VIDEO_DIR,
     SESSION_LABEL_MAP,
+    RACING_LINES_DIR,
 )
 from components.data_loader import get_event_schedule, load_session_data, load_mistake_data
 
@@ -36,6 +37,8 @@ class SidebarSelections:
     mistake_meta_path: str
     compare_driver_number: Optional[str]
     df_compare: Optional[pd.DataFrame]
+    racing_line_path: str
+    df_full: pd.DataFrame
 
 
 def _build_session_options(
@@ -156,6 +159,7 @@ def render_sidebar() -> SidebarSelections:
     output_stem = f"{stem}_{driver_number}"
     mistake_parquet_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet")
     mistake_meta_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json")
+    racing_line_json = RACING_LINES_DIR / f"{output_stem}_racing_line.json"
 
     # ── AI Models Status ──────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -187,8 +191,12 @@ def render_sidebar() -> SidebarSelections:
     # LSTM Tyre: always gray
     st.sidebar.markdown(f"{gray_dot} LSTM Tyre", unsafe_allow_html=True)
 
-    # A* Racing Line: always gray
-    st.sidebar.markdown(f"{gray_dot} A* Racing Line", unsafe_allow_html=True)
+    # A* Racing Line
+    astar_exists = Path(racing_line_json).exists()
+    st.sidebar.markdown(
+        f"{green_dot if astar_exists else gray_dot} A* Racing Line",
+        unsafe_allow_html=True,
+    )
 
     # ── Export Section ────────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -250,4 +258,6 @@ def render_sidebar() -> SidebarSelections:
         mistake_meta_path=mistake_meta_path,
         compare_driver_number=compare_driver_number,
         df_compare=df_compare,
+        racing_line_path=str(racing_line_json),
+        df_full=df,
     )

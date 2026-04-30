@@ -35,10 +35,9 @@ def render_telemetry(
 
     # ── Metric Cards Row ──────────────────────────────────────────────────
     scrub_val = st.session_state.get("scrub_seconds", 0.0)
-    hrs, remainder = divmod(scrub_val, 3600)
-    mins, secs = divmod(remainder, 60)
+    mins, secs = divmod(scrub_val, 60)
     ms = (secs - int(secs)) * 1000
-    time_str = f"{int(hrs):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+    time_str = f"{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
 
     top_speed = float(df_driver["Speed"].max())
 

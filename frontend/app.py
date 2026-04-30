@@ -39,14 +39,30 @@ st.markdown(
     [data-testid="stMetric"] {
         background: #1a2030;
         border: 1px solid #ffffff12;
-        border-radius: 6px;
-        padding: 12px;
+        border-radius: 8px;
+        padding: 10px 12px;
+        transition: all 0.3s ease-in-out;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    [data-testid="stMetric"]:hover {
+        background: #1e2538;
+        border-color: #00d4ff33;
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
     }
 
-    /* 4. Monospace metric values */
+    /* 4. Metric values and labels */
     [data-testid="stMetricValue"] {
         font-family: 'Courier New', Courier, monospace;
-        font-size: 1.4rem;
+        font-size: 1.5rem !important;
+        color: #00d4ff !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+        color: #6b7890 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
     }
 
     /* 5. Tab styling */
@@ -86,8 +102,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Disable typing in selectboxes (JS injection) ─────────────────────────────
 import streamlit.components.v1 as components
+
+# ── Disable typing in selectboxes (JS injection) ─────────────────────────────
 components.html(
     """
     <script>
@@ -98,6 +115,7 @@ components.html(
     style.textContent = `
         div[data-baseweb="select"] input {
             caret-color: transparent !important;
+            cursor: pointer !important;
         }
     `;
     doc.head.appendChild(style);
@@ -106,11 +124,13 @@ components.html(
         doc.querySelectorAll('div[data-baseweb="select"] input').forEach(el => {
             if (el._locked) return;
             el._locked = true;
+            
+            // 1. Make readonly
             el.setAttribute('readonly', 'true');
 
-            // Block Backspace/Delete — BaseWeb handles them before readonly kicks in
+            // 2. Block typing (letters, numbers, space) and deletions
             el.addEventListener('keydown', e => {
-                if (e.key === 'Backspace' || e.key === 'Delete') {
+                if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                 }
@@ -123,7 +143,7 @@ components.html(
     observer.observe(doc.body, { childList: true, subtree: true });
     </script>
     """,
-    height=0,
+    height=0
 )
 
 # ── Imports ───────────────────────────────────────────────────────────────────
@@ -133,7 +153,8 @@ from components.telemetry_charts import render_telemetry
 from components.track_map import render_track_map
 from components.cv_feed import render_cv_feed
 from components.ai_analysis import render_ai_analysis
-from components.data_loader import load_mistake_data, load_mistake_meta
+from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line
+from components.racing_line import render_racing_line
 
 # ── Step 1: Sidebar ──────────────────────────────────────────────────────────
 sel = render_sidebar()
@@ -141,12 +162,18 @@ sel = render_sidebar()
 # ── Step 2: Load AI data ─────────────────────────────────────────────────────
 df_mistakes = load_mistake_data(sel.mistake_parquet_path)
 meta = load_mistake_meta(sel.mistake_meta_path)
+racing_line_data = load_racing_line(sel.racing_line_path)
 
 # ── Step 3: Header bar ───────────────────────────────────────────────────────
 render_header_bar(sel, meta)
 
 # ── Step 4: Tabs ──────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["🏎 Race Intelligence", "📊 Telemetry", "🧠 AI Analysis"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🏎 Race Intelligence",
+    "📊 Telemetry",
+    "🧠 AI Analysis",
+    "🛣 Racing Line"
+])
 
 # ── Tab 1: Race Intelligence ─────────────────────────────────────────────────
 with tab1:
@@ -161,15 +188,16 @@ with tab1:
         min_t = float(sel.df_driver[time_col].min())
         max_t = float(sel.df_driver[time_col].max())
 
-    # Clamp initial value to valid range
-    scrub_init = st.session_state.get("scrub_seconds", max_t)
-    scrub_init = max(min_t, min(scrub_init, max_t))
+    # Clamp session state value to valid range
+    if "scrub_seconds" not in st.session_state:
+        st.session_state["scrub_seconds"] = max_t
+    else:
+        st.session_state["scrub_seconds"] = max(min_t, min(st.session_state["scrub_seconds"], max_t))
 
     st.slider(
         "Master session time",
         min_value=min_t,
         max_value=max_t,
-        value=scrub_init,
         format="%.1f s",
         key="scrub_seconds",
         label_visibility="collapsed",
@@ -186,6 +214,7 @@ with tab1:
     with col_right:
         st.markdown("**LIVE TRACK MAP**")
 
+        # Map mode (existing)
         map_mode = st.radio(
             "Map mode",
             options=["Speed", "Mistakes"],
@@ -194,11 +223,31 @@ with tab1:
         )
         mode_key = "speed" if map_mode == "Speed" else "mistakes"
 
+        # Overlay controls (new — only show if data exists)
+        overlay_col1, overlay_col2 = st.columns(2)
+        with overlay_col1:
+            show_optimal = st.checkbox(
+                "Show A* line",
+                value=False,
+                disabled=(racing_line_data is None),
+                help="Requires racing line data. Run optimal_line.py first."
+            )
+        with overlay_col2:
+            show_ghost = st.checkbox(
+                "Show ghost dot",
+                value=False,
+                disabled=(racing_line_data is None),
+                help="Ghost dot shows where you should be on the optimal line."
+            )
+
         render_track_map(
             df_filtered=sel.df_driver,
             mode=mode_key,
             df_mistakes=df_mistakes,
             scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
+            racing_line_data=racing_line_data,
+            show_optimal_line=show_optimal,
+            show_ghost=show_ghost
         )
 
 # ── Tab 2: Telemetry ─────────────────────────────────────────────────────────
@@ -218,4 +267,11 @@ with tab3:
         meta=meta,
         df_session=sel.df_driver,
         scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
+    )
+
+with tab4:
+    render_racing_line(
+        racing_line_data=racing_line_data,
+        driver_number=sel.driver_number,
+        df_full=sel.df_full
     )

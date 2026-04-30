@@ -129,3 +129,14 @@ def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
         sampled = pd.concat([sampled, df.iloc[[-1]]])
 
     return sampled
+
+
+@st.cache_data(show_spinner=False)
+def load_racing_line(filepath: str) -> Optional[dict]:
+    if not Path(filepath).exists():
+        return None
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None

@@ -20,8 +20,10 @@ def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number
         session.load(laps=True, telemetry=False, weather=False)
         fastest = session.laps.pick_drivers(driver_number).pick_fastest()
         lap_time = fastest["LapTime"]
-        formatted = str(lap_time).split(" ")[-1][:10]
-        return formatted
+        total_seconds = lap_time.total_seconds()
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds % 60
+        return f"{minutes:02d}:{seconds:06.3f}"
     except Exception:
         return "—"
 
@@ -33,7 +35,7 @@ def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
         sel: SidebarSelections dataclass.
         mistake_meta: Parsed mistake metadata dict, or None.
     """
-    cols = st.columns([1, 1, 1, 1, 1, 1, 1.4])
+    cols = st.columns([1, 1, 1, 1, 1.2, 1.2, 1.8])
 
     # Derive round_num and session_type from session_filepath
     filepath_stem = Path(sel.session_filepath).stem  # e.g. "2024_1_Q"
