@@ -93,7 +93,8 @@ class TestRacingLineGrid(unittest.TestCase):
 
     def test_find_start_end_different(self):
         grid = build_grid(self.df)
-        start, end = find_start_end_nodes(grid, self.df, 50.0)
+        adj = build_adjacency(grid)
+        start, end = find_start_end_nodes(grid, self.df, 50.0, adj)
         self.assertNotEqual(start, end)
 
 

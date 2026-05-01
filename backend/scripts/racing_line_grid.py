@@ -20,6 +20,9 @@ SPEED_WEIGHT_FACTOR: float = 1.0
 BRAKE_WEIGHT_FACTOR: float = 2.0
 MIN_POINTS_PER_CELL: int = 1
 DIAGONAL_COST_FACTOR: float = 1.4142135623730951
+APPROX_LAP_SECONDS: float = 90.0
+MAX_SPEED_FOR_WEIGHT: float = 380.0
+MAX_BRAKE_FOR_WEIGHT: float = 100.0
 
 @dataclass
 class GridNode:
@@ -46,11 +49,49 @@ def compute_node_weight(mean_speed: float, mean_brake: float) -> float:
     Returns:
         The computed traversal cost.
     """
-    speed_reward = (mean_speed / 380.0) * SPEED_WEIGHT_FACTOR
-    brake_penalty = (mean_brake / 100.0) * BRAKE_WEIGHT_FACTOR
+    speed_reward = (mean_speed / MAX_SPEED_FOR_WEIGHT) * SPEED_WEIGHT_FACTOR
+    brake_penalty = (mean_brake / MAX_BRAKE_FOR_WEIGHT) * BRAKE_WEIGHT_FACTOR
     weight = max(0.01, 1.0 - speed_reward + brake_penalty)
     return weight
 
+
+def _compute_grid_indices(df: pd.DataFrame, x_min: float, y_min: float, resolution: float) -> pd.DataFrame:
+    """Compute grid indices for telemetry coordinates."""
+    df_grid = df.copy()
+    df_grid["grid_i"] = ((df_grid["X"] - x_min) / resolution).astype(int)
+    df_grid["grid_j"] = ((df_grid["Y"] - y_min) / resolution).astype(int)
+    return df_grid
+
+def _aggregate_cells(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate points inside each grid cell."""
+    grouped = df.groupby(["grid_i", "grid_j"]).agg(
+        mean_speed=("Speed", "mean"),
+        mean_brake=("Brake", "mean"),
+        point_count=("X", "count"),
+        center_x=("X", "mean"),
+        center_y=("Y", "mean")
+    ).reset_index()
+    return grouped[grouped["point_count"] >= MIN_POINTS_PER_CELL]
+
+def _create_grid_nodes(grouped: pd.DataFrame) -> Dict[Tuple[int, int], GridNode]:
+    """Create GridNode objects from aggregated cell data."""
+    grid = {}
+    for row in grouped.itertuples(index=False):
+        i = int(row.grid_i)
+        j = int(row.grid_j)
+        weight = compute_node_weight(row.mean_speed, row.mean_brake)
+        node = GridNode(
+            grid_i=i,
+            grid_j=j,
+            center_x=row.center_x,
+            center_y=row.center_y,
+            mean_speed=row.mean_speed,
+            mean_brake=row.mean_brake,
+            weight=weight,
+            point_count=int(row.point_count)
+        )
+        grid[(i, j)] = node
+    return grid
 
 def build_grid(
     df: pd.DataFrame,
@@ -68,38 +109,9 @@ def build_grid(
     x_min = df["X"].min()
     y_min = df["Y"].min()
     
-    # We create a copy to avoid SettingWithCopyWarning if a slice was passed
-    df_grid = df.copy()
-    
-    df_grid["grid_i"] = ((df_grid["X"] - x_min) / resolution).astype(int)
-    df_grid["grid_j"] = ((df_grid["Y"] - y_min) / resolution).astype(int)
-    
-    grouped = df_grid.groupby(["grid_i", "grid_j"]).agg(
-        mean_speed=("Speed", "mean"),
-        mean_brake=("Brake", "mean"),
-        point_count=("X", "count"),
-        center_x=("X", "mean"),
-        center_y=("Y", "mean")
-    ).reset_index()
-    
-    grouped = grouped[grouped["point_count"] >= MIN_POINTS_PER_CELL]
-    
-    grid = {}
-    for row in grouped.itertuples(index=False):
-        i = int(row.grid_i)
-        j = int(row.grid_j)
-        weight = compute_node_weight(row.mean_speed, row.mean_brake)
-        node = GridNode(
-            grid_i=i,
-            grid_j=j,
-            center_x=row.center_x,
-            center_y=row.center_y,
-            mean_speed=row.mean_speed,
-            mean_brake=row.mean_brake,
-            weight=weight,
-            point_count=int(row.point_count)
-        )
-        grid[(i, j)] = node
+    df_grid = _compute_grid_indices(df, x_min, y_min, resolution)
+    grouped = _aggregate_cells(df_grid)
+    grid = _create_grid_nodes(grouped)
         
     logger.info(f"Grid built: {len(grid)} valid nodes at resolution={resolution}")
     gc.collect()
@@ -250,6 +262,17 @@ def find_start_end_nodes(
     return start_key, end_key
 
 
+def _compute_arc_length(df: pd.DataFrame) -> float:
+    """Compute total arc length in coordinate units."""
+    dx = df["X"].diff().fillna(0.0)
+    dy = df["Y"].diff().fillna(0.0)
+    return float(np.sqrt(dx**2 + dy**2).sum())
+
+def _estimate_lap_count(df: pd.DataFrame) -> int:
+    """Estimate number of laps based on session duration."""
+    session_duration_s = (df["SessionTime"].max() - df["SessionTime"].min()).total_seconds()
+    return max(1, round(session_duration_s / APPROX_LAP_SECONDS))
+
 def compute_coordinate_scale(
     df: pd.DataFrame,
     circuit_length_km: float
@@ -268,12 +291,9 @@ def compute_coordinate_scale(
     """
     df_sorted = df.sort_values("SessionTime")
     
-    dx = df_sorted["X"].diff().fillna(0.0)
-    dy = df_sorted["Y"].diff().fillna(0.0)
-    arc_length_units = float(np.sqrt(dx**2 + dy**2).sum())
+    arc_length_units = _compute_arc_length(df_sorted)
+    estimated_laps = _estimate_lap_count(df_sorted)
     
-    session_duration_s = (df_sorted["SessionTime"].max() - df_sorted["SessionTime"].min()).total_seconds()
-    estimated_laps = max(1, round(session_duration_s / 90.0))
     arc_per_lap_units = arc_length_units / estimated_laps
     
     circuit_length_m = circuit_length_km * 1000.0
@@ -286,3 +306,12 @@ def compute_coordinate_scale(
     )
     
     return scale
+
+
+def get_node_for_row(row, x_min: float, y_min: float, resolution: float, grid: dict) -> tuple:
+    """Get the appropriate grid node for a given telemetry row."""
+    i = int((row.X - x_min) / resolution)
+    j = int((row.Y - y_min) / resolution)
+    if (i, j) in grid: 
+        return (i, j)
+    return get_nearest_node(grid, i, j)

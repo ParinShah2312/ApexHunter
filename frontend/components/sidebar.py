@@ -11,6 +11,10 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+@st.cache_data(show_spinner=False)
+def _convert_df_to_csv(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
+
 from config import (
     AVAILABLE_YEARS,
     DATA_LAKE_DIR,
@@ -76,7 +80,7 @@ def _build_session_options(
 
 def _build_driver_options(df: pd.DataFrame) -> List[str]:
     """Builds a sorted list of 'Name (#Number)' labels for the driver selectbox."""
-    available_numbers = sorted(df["Driver"].dropna().unique())
+    available_numbers = sorted(df["Driver"].dropna().astype(str).unique())
     driver_list = [
         (
             DRIVER_MAPPING.get(d, "Unknown Driver"),
@@ -94,6 +98,25 @@ def _get_default_index(key: str, options: list) -> int:
     if saved is not None and saved in options:
         return options.index(saved)
     return 0
+
+
+_DOT_GREEN: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#00ff88;box-shadow:0 0 5px #00ff88;margin-right:6px"></span>'
+_DOT_GRAY: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3a4558;margin-right:6px"></span>'
+
+def _status_dot(is_active: bool) -> str:
+    """Returns the HTML span string for a green or gray dot."""
+    return _DOT_GREEN if is_active else _DOT_GRAY
+
+def _derive_output_paths(session_filepath: str, driver_number: str) -> Dict[str, str]:
+    """Derives output paths for models based on the session and driver."""
+    stem = Path(session_filepath).stem
+    output_stem = f"{stem}_{driver_number}"
+    return {
+        "mistake_parquet": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet"),
+        "mistake_meta": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json"),
+        "racing_line": str(RACING_LINES_DIR / f"{output_stem}_racing_line.json"),
+        "tyre_prediction": str(TYRE_PREDICTIONS_DIR / f"{output_stem}_tyre.json"),
+    }
 
 
 def render_sidebar() -> SidebarSelections:
@@ -131,10 +154,19 @@ def render_sidebar() -> SidebarSelections:
 
     # Driver
     driver_labels = _build_driver_options(df)
+    if not driver_labels:
+        st.error("No drivers found in this session.")
+        st.stop()
+        
     driver_idx = _get_default_index("sel_driver", driver_labels)
     selected_driver_label = st.sidebar.selectbox(
         "Driver", driver_labels, index=driver_idx, key="sel_driver"
     )
+    
+    if selected_driver_label is None:
+        st.error("Please select a driver.")
+        st.stop()
+        
     driver_number = selected_driver_label.split(" (#")[1].replace(")", "")
     driver_name = selected_driver_label.split(" (#")[0]
 
@@ -154,55 +186,45 @@ def render_sidebar() -> SidebarSelections:
             df_compare = df[df["Driver"] == comp_num].copy()
 
     # Filter primary driver
-    df_driver = df[df["Driver"] == driver_number].copy()
+    df_driver = df[df["Driver"].astype(str) == driver_number].copy()
 
     # ── Derive mistake file paths ─────────────────────────────────────────
-    stem = Path(session_filepath).stem
-    output_stem = f"{stem}_{driver_number}"
-    mistake_parquet_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet")
-    mistake_meta_path = str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json")
-    racing_line_json = RACING_LINES_DIR / f"{output_stem}_racing_line.json"
-    tyre_json = TYRE_PREDICTIONS_DIR / f"{output_stem}_tyre.json"
-    tyre_prediction_path = str(tyre_json)
+    paths = _derive_output_paths(session_filepath, driver_number)
+    mistake_parquet_path = paths["mistake_parquet"]
+    mistake_meta_path = paths["mistake_meta"]
+    racing_line_json = paths["racing_line"]
+    tyre_prediction_path = paths["tyre_prediction"]
+    output_stem = f"{Path(session_filepath).stem}_{driver_number}"
 
     # ── AI Models Status ──────────────────────────────────────────────────
     st.sidebar.markdown("---")
     st.sidebar.markdown("**AI Models**")
 
-    green_dot = (
-        '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
-        'background:#00ff88;box-shadow:0 0 5px #00ff88;margin-right:6px"></span>'
-    )
-    gray_dot = (
-        '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
-        'background:#3a4558;margin-right:6px"></span>'
-    )
-
-    # YOLOv11-Seg: any .mp4 file exists in PROCESSED_VIDEO_DIR
-    has_video = any(PROCESSED_VIDEO_DIR.glob("*.mp4")) if PROCESSED_VIDEO_DIR.exists() else False
+    # YOLOv11-Seg: check specific video
+    has_video = any(PROCESSED_VIDEO_DIR.glob(f"{output_stem}*.mp4")) if PROCESSED_VIDEO_DIR.exists() else False
     st.sidebar.markdown(
-        f"{green_dot if has_video else gray_dot} YOLOv11-Seg",
+        f"{_status_dot(has_video)} YOLOv11-Seg",
         unsafe_allow_html=True,
     )
 
     # Isolation Forest
     has_iso = Path(mistake_parquet_path).exists()
     st.sidebar.markdown(
-        f"{green_dot if has_iso else gray_dot} Isolation Forest",
+        f"{_status_dot(has_iso)} Isolation Forest",
         unsafe_allow_html=True,
     )
 
     # LSTM Tyre Cliff
     lstm_exists = Path(tyre_prediction_path).exists()
     st.sidebar.markdown(
-        f"{green_dot if lstm_exists else gray_dot} LSTM Tyre Cliff",
+        f"{_status_dot(lstm_exists)} LSTM Tyre Cliff",
         unsafe_allow_html=True,
     )
 
     # A* Racing Line
     astar_exists = Path(racing_line_json).exists()
     st.sidebar.markdown(
-        f"{green_dot if astar_exists else gray_dot} A* Racing Line",
+        f"{_status_dot(astar_exists)} A* Racing Line",
         unsafe_allow_html=True,
     )
 
@@ -215,7 +237,7 @@ def render_sidebar() -> SidebarSelections:
         if has_iso:
             df_mistakes = load_mistake_data(mistake_parquet_path)
             if df_mistakes is not None:
-                csv_data = df_mistakes.to_csv(index=False).encode("utf-8")
+                csv_data = _convert_df_to_csv(df_mistakes)
                 st.download_button("CSV", data=csv_data, file_name=f"{output_stem}_mistakes.csv", mime="text/csv")
             else:
                 st.button("CSV", disabled=True)

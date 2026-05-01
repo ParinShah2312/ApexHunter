@@ -13,14 +13,48 @@ from config import PROCESSED_CSV_DIR, PROCESSED_VIDEO_DIR
 from components.data_loader import load_cv_metrics
 
 
+from typing import List
+
+def _find_available_videos() -> List[Path]:
+    """Return sorted list of .mp4 files in PROCESSED_VIDEO_DIR."""
+    if not PROCESSED_VIDEO_DIR.exists():
+        return []
+    return sorted(PROCESSED_VIDEO_DIR.glob("*.mp4"))
+
+def _get_current_status(df_cv: pd.DataFrame, scrub_seconds: float) -> str:
+    """Return the apex status string for the frame closest to scrub_seconds."""
+    closest_idx = (df_cv["timestamp_sec"] - scrub_seconds).abs().idxmin()
+    return str(df_cv.loc[closest_idx, "status"])
+
+def _status_badge_html(status: str) -> str:
+    """Return the styled HTML badge for the given apex status string."""
+    badge_map = {
+        "Hitting Apex": ("#00ff8822", "#00ff88", "#00ff8844"),
+        "Near Apex": ("#ffb80022", "#ffb800", "#ffb80044"),
+        "Missing Apex": ("#ff3a3a22", "#ff3a3a", "#ff3a3a44"),
+        "Straight": ("#3a455822", "#6b7890", "#3a455844"),
+    }
+    bg, text, border = badge_map.get(status, ("#3a455822", "#6b7890", "#3a455844"))
+    return (
+        f'<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
+        f'border:1px solid {border};background:{bg};color:{text};font-weight:600;'
+        f'font-size:13px;margin-bottom:8px">{status}</div>'
+    )
+
+def _render_proportion_bar(hitting: int, near: int, missing: int, total_curb: int) -> None:
+    """Render the colored proportion bar as st.markdown."""
+    st.markdown(
+        f'<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:4px">'
+        f'<div style="flex:{hitting};background:#00ff88"></div>'
+        f'<div style="flex:{near};background:#ffb800"></div>'
+        f'<div style="flex:{missing};background:#ff3a3a"></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 def render_cv_feed(scrub_seconds: float) -> None:
     """Renders the CV video feed panel with status badge and stat cards."""
-
-    if not PROCESSED_VIDEO_DIR.exists():
-        st.info("No processed videos found. Run backend/scripts/run_inference.py first.")
-        return
-
-    mp4_files = sorted(PROCESSED_VIDEO_DIR.glob("*.mp4"))
+    mp4_files = _find_available_videos()
     if not mp4_files:
         st.info("No processed videos found. Run backend/scripts/run_inference.py first.")
         return
@@ -35,21 +69,8 @@ def render_cv_feed(scrub_seconds: float) -> None:
 
     # Status badge
     if df_cv is not None and not df_cv.empty:
-        closest_idx = (df_cv["timestamp_sec"] - scrub_seconds).abs().idxmin()
-        current_status = df_cv.loc[closest_idx, "status"]
-        badge_map = {
-            "Hitting Apex": ("#00ff8822", "#00ff88", "#00ff8844"),
-            "Near Apex": ("#ffb80022", "#ffb800", "#ffb80044"),
-            "Missing Apex": ("#ff3a3a22", "#ff3a3a", "#ff3a3a44"),
-            "Straight": ("#3a455822", "#6b7890", "#3a455844"),
-        }
-        bg, text, border = badge_map.get(current_status, ("#3a455822", "#6b7890", "#3a455844"))
-        st.markdown(
-            f'<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
-            f'border:1px solid {border};background:{bg};color:{text};font-weight:600;'
-            f'font-size:13px;margin-bottom:8px">{current_status}</div>',
-            unsafe_allow_html=True,
-        )
+        current_status = _get_current_status(df_cv, scrub_seconds)
+        st.markdown(_status_badge_html(current_status), unsafe_allow_html=True)
     else:
         st.markdown(
             '<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
@@ -91,14 +112,7 @@ def render_cv_feed(scrub_seconds: float) -> None:
             st.metric("Missing Apex", str(missing))
 
         if total_curb_frames > 0:
-            st.markdown(
-                f'<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:4px">'
-                f'<div style="flex:{hitting};background:#00ff88"></div>'
-                f'<div style="flex:{near};background:#ffb800"></div>'
-                f'<div style="flex:{missing};background:#ff3a3a"></div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            _render_proportion_bar(hitting, near, missing, total_curb_frames)
     else:
         c1, c2, c3, c4 = st.columns(4)
         with c1:

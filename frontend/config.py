@@ -13,11 +13,19 @@ PROJECT_ROOT = FRONTEND_DIR.parent
 DATA_LAKE_DIR = PROJECT_ROOT / "data_lake" / "clean_data"
 CACHE_DIR = PROJECT_ROOT / "cache"
 
-# Enable fastf1 cache
-CACHE_DIR.mkdir(exist_ok=True)
-fastf1.Cache.enable_cache(str(CACHE_DIR))
+MISTAKE_DATA_DIR = PROJECT_ROOT / "data_lake" / "mistake_data"
+PROCESSED_VIDEO_DIR = PROJECT_ROOT / "data_lake" / "processed_video"
+PROCESSED_CSV_DIR = PROJECT_ROOT / "data_lake" / "processed_csv"
+RACING_LINES_DIR = PROJECT_ROOT / "data_lake" / "racing_lines"
+TYRE_PREDICTIONS_DIR = PROJECT_ROOT / "data_lake" / "tyre_predictions"
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+try:
+    CACHE_DIR.mkdir(exist_ok=True)
+    fastf1.Cache.enable_cache(str(CACHE_DIR))
+except Exception:
+    pass   # cache is optional — dashboard works without it
+
+# ── Session constants ─────────────────────────────────────────────────────────
 AVAILABLE_YEARS = [2023, 2024]
 
 SESSION_LABEL_MAP = {
@@ -27,6 +35,7 @@ SESSION_LABEL_MAP = {
     "SQ": "Sprint Shootout",
 }
 
+# ── Driver mapping ────────────────────────────────────────────────────────────
 DRIVER_MAPPING = {
     "1": "Max Verstappen",
     "2": "Logan Sargeant",
@@ -54,14 +63,7 @@ DRIVER_MAPPING = {
     "81": "Oscar Piastri",
 }
 
-# ── Data lake output paths ────────────────────────────────────────────────────
-MISTAKE_DATA_DIR = PROJECT_ROOT / "data_lake" / "mistake_data"
-PROCESSED_VIDEO_DIR = PROJECT_ROOT / "data_lake" / "processed_video"
-PROCESSED_CSV_DIR = PROJECT_ROOT / "data_lake" / "processed_csv"
-RACING_LINES_DIR = PROJECT_ROOT / "data_lake" / "racing_lines"
-TYRE_PREDICTIONS_DIR = PROJECT_ROOT / "data_lake" / "tyre_predictions"
-
-# ── Team mapping (driver number → team name) ──────────────────────────────────
+# ── Team mapping ──────────────────────────────────────────────────────────────
 TEAM_MAPPING = {
     "1":  "Red Bull Racing",
     "2":  "Williams",

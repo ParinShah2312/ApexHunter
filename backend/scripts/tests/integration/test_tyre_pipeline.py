@@ -83,11 +83,38 @@ def run_full_pipeline_once() -> dict:
     lg.handlers = [logging.NullHandler()]
     lg.setLevel(logging.CRITICAL)
 
-    from tyre_data import build_training_dataset, SEQUENCE_LENGTH
+    from tyre_data import build_training_dataset, SEQUENCE_LENGTH, extract_stints
     from tyre_model import INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
     from tyre_io import save_model_artifacts, load_model_artifacts, build_prediction_output, save_prediction
 
-    X, y = build_training_dataset(sessions_dir, ["2024"], lg)
+    # ── MOCK FASTF1 LAPS ──
+    # Create fake laps that align with the synthetic SessionTime (0-180s, 300-480s)
+    fake_laps_data = []
+    # Stint 1
+    for i in range(15):
+        fake_laps_data.append({
+            "DriverNumber": "44", "Stint": 1, "Compound": "SOFT", "LapNumber": i+1,
+            "TyreLife": i+1,
+            "LapStartTime": pd.Timedelta(seconds=i*12),
+            "Time": pd.Timedelta(seconds=(i+1)*12),
+            "LapTime": pd.Timedelta(seconds=12)
+        })
+    # Stint 2
+    for i in range(15):
+        fake_laps_data.append({
+            "DriverNumber": "44", "Stint": 2, "Compound": "HARD", "LapNumber": i+16,
+            "TyreLife": i+1,
+            "LapStartTime": pd.Timedelta(seconds=300 + i*12),
+            "Time": pd.Timedelta(seconds=300 + (i+1)*12),
+            "LapTime": pd.Timedelta(seconds=12)
+        })
+    fake_laps_df = pd.DataFrame(fake_laps_data)
+    
+    mock_session = mock.MagicMock()
+    mock_session.laps.pick_drivers.return_value = fake_laps_df
+
+    with mock.patch("tyre_data.fastf1.get_session", return_value=mock_session):
+        X, y = build_training_dataset(sessions_dir, ["2024"], lg)
 
     from sklearn.preprocessing import StandardScaler
     X_2d = X.reshape(-1, INPUT_SIZE)
@@ -154,7 +181,7 @@ def run_full_pipeline_once() -> dict:
     save_model_artifacts(best_model, scaler, config, models_dir, lg)
 
     # Predict
-    from tyre_data import detect_stints, build_stint_sequences, CLIFF_SPEED_DROP_KMH
+    from tyre_data import CLIFF_SPEED_DROP_KMH
     from tyre_model import monte_carlo_predict
 
     model, scaler_loaded, config_loaded = load_model_artifacts(models_dir, lg)
@@ -164,19 +191,28 @@ def run_full_pipeline_once() -> dict:
     df_driver.sort_values("SessionTime", inplace=True)
     df_driver.reset_index(drop=True, inplace=True)
 
-    stints = detect_stints(df_driver, lg)
+    stints_data = extract_stints(fake_laps_df, df_driver, lg)
     seq_len = config_loaded["sequence_length"]
 
     stint_results = []
-    for stint_index, stint_df in enumerate(stints):
-        stint_data = build_stint_sequences(stint_df, stint_index, lg)
-        if stint_data is None:
-            continue
+    for stint_data in stints_data:
+        stint_index = stint_data["stint_index"]
         lap_features = pd.DataFrame(stint_data["lap_features"])
         actual_speeds = lap_features["mean_speed"].tolist()
-        sequences = np.array(stint_data["sequences"], dtype=np.float32)
-        if len(sequences) == 0:
-            continue
+        
+        # We need to build padded sequences for the test
+        from tyre_data import LAP_FEATURES
+        features_np = lap_features[LAP_FEATURES].values.copy()
+        
+        if len(features_np) > 1:
+            features_np[0] = features_np[1]
+        
+        padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
+        new_seqs = []
+        for i in range(len(features_np)):
+            new_seqs.append(padded_features[i : i + seq_len])
+        sequences = np.array(new_seqs, dtype=np.float32)
+
         seq_2d = sequences.reshape(-1, INPUT_SIZE)
         seq_scaled = scaler_loaded.transform(seq_2d).reshape(sequences.shape)
         mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
@@ -187,15 +223,12 @@ def run_full_pipeline_once() -> dict:
         cliff_lap = None
         for i, v in enumerate(mean_preds_d):
             if first_pred and v < first_pred - CLIFF_SPEED_DROP_KMH:
-                cliff_lap = i + seq_len
+                cliff_lap = i
                 break
         laps_remaining = (len(actual_speeds) - cliff_lap) if cliff_lap is not None else None
-        predicted_full = [None] * seq_len + mean_preds_d
-        lower_full = [None] * seq_len + lower_d
-        upper_full = [None] * seq_len + upper_d
-        predicted_full = predicted_full[:len(actual_speeds)]
-        lower_full = lower_full[:len(actual_speeds)]
-        upper_full = upper_full[:len(actual_speeds)]
+        predicted_full = mean_preds_d
+        lower_full = lower_d
+        upper_full = upper_d
         stint_results.append({
             "stint_index": stint_index, "n_laps": len(actual_speeds),
             "actual_laps": actual_speeds, "predicted_laps": predicted_full,
@@ -273,14 +306,15 @@ class TestTyrePipeline(unittest.TestCase):
             for val in stint["actual_laps"]:
                 self.assertIsInstance(val, (int, float))
 
-    def test_predicted_laps_first_n_are_none(self) -> None:
+    def test_predicted_laps_match_actual_length(self) -> None:
         with open(self.fixture["output_path"], "r") as f:
             data = json.load(f)
-        seq_len = self.fixture["config"]["sequence_length"]
         for stint in data["stints"]:
+            actual = stint["actual_laps"]
             preds = stint["predicted_laps"]
-            for i in range(min(seq_len, len(preds))):
-                self.assertIsNone(preds[i], f"Expected None at index {i}, got {preds[i]}")
+            self.assertEqual(len(actual), len(preds), "Predicted laps length should match actual laps")
+            for i, p in enumerate(preds):
+                self.assertIsNotNone(p, f"Expected float at index {i}, got None")
 
 
 if __name__ == "__main__":

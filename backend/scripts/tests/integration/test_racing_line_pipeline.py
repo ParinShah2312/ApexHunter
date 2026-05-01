@@ -47,6 +47,7 @@ def run_pipeline_once():
     df.to_parquet(session_file)
 
     output_dir = temp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
     args = argparse.Namespace(
         session=str(session_file),
         driver="44",

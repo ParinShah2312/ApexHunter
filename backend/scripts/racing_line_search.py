@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from racing_line_grid import DEFAULT_GRID_RESOLUTION, GridNode
+from racing_line_grid import GridNode
 
 
 @dataclass
@@ -26,6 +26,26 @@ class SearchResult:
     compute_time_s: float
     found: bool
 
+
+def _reconstruct_path(came_from: dict, end: Tuple[int, int]) -> List[Tuple[int, int]]:
+    """Reconstruct path from came_from dict backwards."""
+    path = []
+    current = end
+    while current is not None:
+        path.append(current)
+        current = came_from[current]
+    path.reverse()
+    return path
+
+def _astar_heuristic_full(
+    current_node: GridNode, end_node: GridNode, min_weight: float
+) -> float:
+    """Compute the heuristic cost from current node to end."""
+    grid_dist = math.sqrt(
+        (current_node.grid_i - end_node.grid_i)**2 +
+        (current_node.grid_j - end_node.grid_j)**2
+    )
+    return grid_dist * min_weight
 
 def astar(
     grid: Dict[Tuple[int, int], GridNode],
@@ -55,18 +75,11 @@ def astar(
         
     end_node = grid[end]
     min_weight = min(n.weight for n in grid.values())
-    min_edge_dist = DEFAULT_GRID_RESOLUTION
-    
-    def h(node_key: Tuple[int, int]) -> float:
-        current_node = grid[node_key]
-        grid_dist = math.sqrt(
-            (current_node.grid_i - end_node.grid_i)**2 +
-            (current_node.grid_j - end_node.grid_j)**2
-        )
-        return grid_dist * min_weight
 
+    
     open_set = []
-    heapq.heappush(open_set, (0.0 + h(start), start))
+    initial_h = _astar_heuristic_full(grid[start], end_node, min_weight)
+    heapq.heappush(open_set, (0.0 + initial_h, start))
     g_scores: Dict[Tuple[int, int], float] = {start: 0.0}
     came_from: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {start: None}
     closed_set = set()
@@ -81,12 +94,7 @@ def astar(
         nodes_expanded += 1
 
         if current == end:
-            path_keys = []
-            curr = end
-            while curr is not None:
-                path_keys.append(curr)
-                curr = came_from[curr]
-            path_keys.reverse()
+            path_keys = _reconstruct_path(came_from, end)
             
             path_coords = [(grid[k].center_x, grid[k].center_y) for k in path_keys]
             total_cost = g_scores[end]
@@ -109,7 +117,7 @@ def astar(
             if neighbor not in g_scores or tentative_g < g_scores[neighbor]:
                 g_scores[neighbor] = tentative_g
                 came_from[neighbor] = current
-                f_new = tentative_g + h(neighbor)
+                f_new = tentative_g + _astar_heuristic_full(grid[neighbor], end_node, min_weight)
                 heapq.heappush(open_set, (f_new, neighbor))
 
     logger.warning("A*: no path found from start to end.")
@@ -159,12 +167,7 @@ def dijkstra(
         nodes_expanded += 1
 
         if current == end:
-            path_keys = []
-            curr = end
-            while curr is not None:
-                path_keys.append(curr)
-                curr = came_from[curr]
-            path_keys.reverse()
+            path_keys = _reconstruct_path(came_from, end)
             
             path_coords = [(grid[k].center_x, grid[k].center_y) for k in path_keys]
             total_cost = g_scores[end]
@@ -347,3 +350,39 @@ def compute_deviation_per_corner(
         deviations.append({"corner": f"T{s+1}", "deviation_m": round(float(deviation_m), 3)})
         
     return deviations
+
+
+def run_full_lap(search_func, nodes: list, grid: dict, adjacency: dict, logger) -> SearchResult:
+    """Run search function across multiple nodes to form a complete lap."""
+    if len(nodes) == 2:
+        return search_func(grid, adjacency, nodes[0], nodes[1], logger)
+        
+    results = []
+    for i in range(len(nodes) - 1):
+        res = search_func(grid, adjacency, nodes[i], nodes[i+1], logger)
+        if not res.found:
+            return res # Failed segment
+        results.append(res)
+        
+    final_coords = results[0].path_coords
+    final_keys = results[0].path_keys
+    total_cost = results[0].total_cost
+    total_expanded = results[0].nodes_expanded
+    total_time = results[0].compute_time_s
+    
+    for r in results[1:]:
+        final_coords += r.path_coords[1:]
+        final_keys += r.path_keys[1:]
+        total_cost += r.total_cost
+        total_expanded += r.nodes_expanded
+        total_time += r.compute_time_s
+        
+    return SearchResult(
+        algorithm=results[0].algorithm,
+        path_coords=final_coords,
+        path_keys=final_keys,
+        total_cost=total_cost,
+        nodes_expanded=total_expanded,
+        compute_time_s=total_time,
+        found=True
+    )

@@ -4,9 +4,10 @@ Handles model definition, hyperparameter search, training, and evaluation."""
 import gc
 import logging
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -80,6 +81,89 @@ class TyreCliffLSTM(nn.Module):
         return self.fc(out[:, -1, :]).squeeze(-1)  # shape: (batch,)
 
 
+def _build_data_loader(
+    X_train: np.ndarray, y_train: np.ndarray, batch_size: int = BATCH_SIZE
+) -> DataLoader:
+    """Create a DataLoader for training data."""
+    X_t = torch.FloatTensor(X_train)
+    y_t = torch.FloatTensor(y_train)
+    dataset = TensorDataset(X_t, y_t)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+def _compute_val_mse(
+    model: nn.Module, X_val_t: torch.Tensor, y_val_t: torch.Tensor, criterion: nn.Module
+) -> float:
+    """Evaluate model and return MSE."""
+    model.eval()
+    with torch.no_grad():
+        val_preds = model(X_val_t)
+        val_mse = float(criterion(val_preds, y_val_t).item())
+    return val_mse
+
+def _run_training_loop(
+    model: nn.Module,
+    train_loader: DataLoader,
+    X_val_t: torch.Tensor,
+    y_val_t: torch.Tensor,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    n_epochs: int,
+    logger: logging.Logger,
+    verbose: bool,
+    config_label: str
+) -> Tuple[float, int]:
+    """Run training loop and return (best validation MSE, best epoch)."""
+    best_val_mse = float("inf")
+    best_epoch = 0
+    train_start = time.time()
+
+    for epoch in range(n_epochs):
+        ep_t0 = time.time()
+        model.train()
+        running_loss = 0.0
+        batch_count = 0
+        for X_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            preds = model(X_batch)
+            loss = criterion(preds, y_batch)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+            batch_count += 1
+
+        avg_loss = running_loss / max(batch_count, 1)
+
+        val_mse = _compute_val_mse(model, X_val_t, y_val_t, criterion)
+
+        if val_mse < best_val_mse:
+            best_val_mse = val_mse
+            best_epoch = epoch + 1
+
+        elapsed = time.time() - ep_t0
+        should_log = (
+            verbose or epoch == 0 or epoch == n_epochs - 1
+            or (epoch + 1) % 5 == 0
+        )
+        if should_log:
+            bar_len = 20
+            filled = int(bar_len * (epoch + 1) / n_epochs)
+            bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
+            pct = 100.0 * (epoch + 1) / n_epochs
+            logger.info(
+                f"{config_label}Epoch {epoch+1:3d}/{n_epochs} "
+                f"|{bar}| {pct:5.1f}%  "
+                f"loss={avg_loss:.6f}  val={val_mse:.6f}  "
+                f"best={best_val_mse:.6f}(ep{best_epoch})  "
+                f"[{elapsed:.2f}s]"
+            )
+
+    total_time = time.time() - train_start
+    logger.info(
+        f"{config_label}Done {n_epochs} epochs in {total_time:.1f}s  "
+        f"| val={val_mse:.6f}  best={best_val_mse:.6f}@ep{best_epoch}"
+    )
+    return best_val_mse, best_epoch
+
 def train_one_config(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -112,10 +196,7 @@ def train_one_config(
     """
     torch.manual_seed(RANDOM_STATE)
 
-    X_t = torch.FloatTensor(X_train)
-    y_t = torch.FloatTensor(y_train)
-    dataset = TensorDataset(X_t, y_t)
-    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    loader = _build_data_loader(X_train, y_train)
 
     model = TyreCliffLSTM(INPUT_SIZE, hidden_size, NUM_LAYERS, DROPOUT_RATE)
     total_params = sum(p.numel() for p in model.parameters())
@@ -128,58 +209,11 @@ def train_one_config(
     X_val_t = torch.FloatTensor(X_val)
     y_val_t = torch.FloatTensor(y_val)
 
-    best_val_mse = float("inf")
-    best_epoch = 0
-    train_start = time.time()
-
-    for epoch in range(n_epochs):
-        ep_t0 = time.time()
-        model.train()
-        running_loss = 0.0
-        batch_count = 0
-        for X_batch, y_batch in loader:
-            optimizer.zero_grad()
-            preds = model(X_batch)
-            loss = criterion(preds, y_batch)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-            batch_count += 1
-
-        avg_loss = running_loss / max(batch_count, 1)
-
-        model.eval()
-        with torch.no_grad():
-            val_preds = model(X_val_t)
-            val_mse = float(criterion(val_preds, y_val_t).item())
-
-        if val_mse < best_val_mse:
-            best_val_mse = val_mse
-            best_epoch = epoch + 1
-
-        elapsed = time.time() - ep_t0
-        should_log = (
-            verbose or epoch == 0 or epoch == n_epochs - 1
-            or (epoch + 1) % 5 == 0
-        )
-        if should_log:
-            bar_len = 20
-            filled = int(bar_len * (epoch + 1) / n_epochs)
-            bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
-            pct = 100.0 * (epoch + 1) / n_epochs
-            logger.info(
-                f"{config_label}Epoch {epoch+1:3d}/{n_epochs} "
-                f"|{bar}| {pct:5.1f}%  "
-                f"loss={avg_loss:.6f}  val={val_mse:.6f}  "
-                f"best={best_val_mse:.6f}(ep{best_epoch})  "
-                f"[{elapsed:.2f}s]"
-            )
-
-    total_time = time.time() - train_start
-    logger.info(
-        f"{config_label}Done {n_epochs} epochs in {total_time:.1f}s  "
-        f"| val={val_mse:.6f}  best={best_val_mse:.6f}@ep{best_epoch}"
+    best_val_mse, _ = _run_training_loop(
+        model, loader, X_val_t, y_val_t, criterion, optimizer,
+        n_epochs, logger, verbose, config_label
     )
+
     return (model, best_val_mse)
 
 
@@ -397,3 +431,66 @@ def monte_carlo_predict(
 
     model.eval()
     return (mean_preds, lower, upper)
+
+
+def predict_single_stint(
+    stint_data: dict, model: nn.Module, scaler: Any,
+    y_mean: float, y_std: float, seq_len: int
+) -> dict:
+    """Predict cliff for a single stint and return the result dictionary."""
+    from tyre_data import LAP_FEATURES
+    stint_index = stint_data["stint_index"]
+    lap_features = pd.DataFrame(stint_data["lap_features"])
+    actual_speeds = lap_features["mean_speed"].tolist()
+    actual_lap_times = lap_features["lap_time_seconds"].tolist()
+    
+    features_np = lap_features[LAP_FEATURES].values.copy()
+    
+    if len(features_np) > 1:
+        features_np[0] = features_np[1]
+    
+    padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
+    
+    new_seqs = []
+    for i in range(len(features_np)):
+        new_seqs.append(padded_features[i : i + seq_len])
+        
+    sequences = np.array(new_seqs, dtype=np.float32)
+    seq_2d = sequences.reshape(-1, INPUT_SIZE)
+    seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
+    
+    mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
+    
+    mean_preds_speed = (mean_preds * y_std + y_mean).tolist()
+    lower_speed = (lower * y_std + y_mean).tolist()
+    upper_speed = (upper * y_std + y_mean).tolist()
+
+    valid_pairs = [(s, t) for s, t in zip(actual_speeds, actual_lap_times) if not pd.isna(t) and t > 0]
+    if valid_pairs:
+        track_dist = float(np.mean([s * t for s, t in valid_pairs]))
+    else:
+        track_dist = actual_speeds[0] * 90.0
+
+    def speed_to_time(s): return track_dist / max(s, 1.0)
+
+    predicted_laps = [speed_to_time(s) for s in mean_preds_speed]
+    confidence_lower = [speed_to_time(s) for s in upper_speed]
+    confidence_upper = [speed_to_time(s) for s in lower_speed]
+    actual_laps_clean = [t if not pd.isna(t) else None for t in actual_lap_times]
+    
+    best_lap_time = min(predicted_laps)
+    best_lap_idx = predicted_laps.index(best_lap_time)
+    cliff_lap = None
+    for i in range(best_lap_idx + 1, len(predicted_laps)):
+        if predicted_laps[i] > best_lap_time + 1.5:
+            cliff_lap = i
+            break
+
+    laps_remaining = (len(actual_lap_times) - cliff_lap) if cliff_lap is not None else None
+
+    return {
+        "stint_index": stint_index, "n_laps": len(actual_lap_times),
+        "actual_laps": actual_laps_clean, "predicted_laps": predicted_laps,
+        "confidence_upper": confidence_upper, "confidence_lower": confidence_lower,
+        "cliff_lap": cliff_lap, "laps_remaining": laps_remaining,
+    }

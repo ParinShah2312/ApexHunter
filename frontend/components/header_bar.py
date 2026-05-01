@@ -4,7 +4,7 @@ Renders the persistent KPI strip above the tabs.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import fastf1
 import streamlit as st
@@ -28,6 +28,34 @@ def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number
         return "—"
 
 
+def _parse_session_label(session_label: str) -> Tuple[int, str]:
+    """Parse 'Round N: EventName - SessionType' → (round_num, session_type_code).
+    Returns (0, 'Q') on parse failure."""
+    try:
+        round_num = int(session_label.split("Round ")[1].split(":")[0])
+        if "Race" in session_label: session_type = "R"
+        elif "Qualifying" in session_label: session_type = "Q"
+        elif "Sprint" in session_label: session_type = "Sprint"
+        else: session_type = "Q"
+        return (round_num, session_type)
+    except Exception:
+        return (0, "Q")
+
+
+def _driver_identity_html(driver_number: str, driver_name: str, team_name: str) -> str:
+    """Build the styled HTML div for the driver identity block."""
+    return (
+        f'<div style="text-align:right;padding:4px 0">'
+        f'<div style="font-family:\'Courier New\',monospace;font-size:2rem;'
+        f'font-weight:700;color:#00d4ff;line-height:1">{driver_number}</div>'
+        f'<div style="font-size:1rem;font-weight:600;letter-spacing:1px;'
+        f'color:#e8edf5">{driver_name.upper()}</div>'
+        f'<div style="font-size:0.75rem;color:#6b7890;letter-spacing:1px">'
+        f'{team_name}</div>'
+        f'</div>'
+    )
+
+
 def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
     """Renders the persistent KPI strip above the tabs.
 
@@ -37,15 +65,8 @@ def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
     """
     cols = st.columns([1, 1, 1, 1, 1.2, 1.2, 1.8])
 
-    # Derive round_num and session_type from session_filepath
-    filepath_stem = Path(sel.session_filepath).stem  # e.g. "2024_1_Q"
-    parts = filepath_stem.split("_")
-    if len(parts) >= 3:
-        round_num = int(parts[1])
-        session_type = parts[2]
-    else:
-        round_num = 1
-        session_type = "Q"
+    # Derive round_num and session_type
+    round_num, session_type = _parse_session_label(sel.session_label)
 
     # KPI 1 — Lap Time
     with cols[0]:
@@ -91,14 +112,7 @@ def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
     with cols[6]:
         team_name = TEAM_MAPPING.get(sel.driver_number, "Unknown Team")
         st.markdown(
-            f'<div style="text-align:right;padding:4px 0">'
-            f'<div style="font-family:\'Courier New\',monospace;font-size:2rem;'
-            f'font-weight:700;color:#00d4ff;line-height:1">{sel.driver_number}</div>'
-            f'<div style="font-size:1rem;font-weight:600;letter-spacing:1px;'
-            f'color:#e8edf5">{sel.driver_name.upper()}</div>'
-            f'<div style="font-size:0.75rem;color:#6b7890;letter-spacing:1px">'
-            f'{team_name}</div>'
-            f'</div>',
+            _driver_identity_html(sel.driver_number, sel.driver_name, team_name),
             unsafe_allow_html=True,
         )
 

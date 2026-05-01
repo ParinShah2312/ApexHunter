@@ -1,17 +1,17 @@
 """Orchestrator: Runs YOLOv11-Seg on F1 video, outputs HUD video + metrics CSV."""
 
-import sys
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 from tqdm import tqdm
 
-from utils import setup_logger, DATA_LAKE_DIR, PROJECT_ROOT, CONFIG
 from inference_geometry import classify_apex_status, compute_wheel_positions
-from inference_masking import process_masks
 from inference_hud import draw_hud
-from inference_io import open_video, create_video_writer, create_csv_writer, write_csv_row
+from inference_io import create_csv_writer, create_video_writer, open_video, write_csv_row
+from inference_masking import process_masks
+from utils import CONFIG, DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -21,17 +21,17 @@ except ImportError:
     logger.error("ultralytics is not installed. Run: pip install ultralytics")
     sys.exit(1)
 
-MODEL_PATH = PROJECT_ROOT / "models" / "best.pt"
-DEFAULT_INPUT_VIDEO = DATA_LAKE_DIR / "edited_videos" / "2024" / "01_bahrain_ver_pole - Trim.mp4"
-OUTPUT_DIR = DATA_LAKE_DIR / "processed_video"
-OUTPUT_CSV_DIR = DATA_LAKE_DIR / "processed_csv"
-ALPHA = CONFIG.get("inference", {}).get("alpha", 0.5)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_CSV_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_PATH: Path = PROJECT_ROOT / "models" / "best.pt"
+DEFAULT_INPUT_VIDEO: Path = DATA_LAKE_DIR / "edited_videos" / "2024" / "01_bahrain_ver_pole - Trim.mp4"
+OUTPUT_DIR: Path = DATA_LAKE_DIR / "processed_video"
+OUTPUT_CSV_DIR: Path = DATA_LAKE_DIR / "processed_csv"
+ALPHA: float = CONFIG.get("inference", {}).get("alpha", 0.5)
 
 
 def process_video(input_video_path: Path, force: bool = False) -> None:
     """Run YOLO inference on a video and produce HUD video + metrics CSV."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_CSV_DIR.mkdir(parents=True, exist_ok=True)
     if not MODEL_PATH.exists():
         logger.error(f"Model not found: {MODEL_PATH}"); sys.exit(1)
     if not input_video_path.exists():

@@ -17,7 +17,7 @@ from tyre_model import (
     INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE,
     run_hyperparameter_search, train_final_model, evaluate_on_test,
 )
-from tyre_io import save_model_artifacts
+from tyre_io import save_model_artifacts, log_training_start, log_dataset_stats, log_training_complete
 
 logger = setup_logger(__name__)
 
@@ -38,24 +38,14 @@ def main() -> None:
     models_dir = Path(args.models_dir) if args.models_dir else PROJECT_ROOT / "models"
     test_split = args.test_split
 
-    logger.info("")
-    logger.info("#" * 56)
-    logger.info("#" + " " * 54 + "#")
-    logger.info("#    ApexHunter -- LSTM Tyre Cliff Predictor" + " " * 10 + "#")
-    logger.info("#" + " " * 54 + "#")
-    logger.info("#" * 56)
-    logger.info(f"  Sessions dir   : {sessions_dir}")
-    logger.info(f"  Models dir     : {models_dir}")
-    logger.info(f"  Seasons        : {args.seasons}")
-    logger.info(f"  Test split     : {test_split}")
-    logger.info(f"  Force retrain  : {args.force}")
-    logger.info(f"  Started at     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("#" * 56)
+    log_training_start(sessions_dir, models_dir, args.seasons, test_split, args.force, logger)
 
     model_path = models_dir / "tyre_lstm.pt"
     if model_path.exists() and not args.force:
         logger.info("Model already exists. Use --force to re-train.")
         return
+
+    models_dir.mkdir(parents=True, exist_ok=True)
 
     # ── PHASE 1: Dataset Construction ─────────────────────────────────────
     logger.info("")
@@ -75,15 +65,7 @@ def main() -> None:
         logger.error("Not enough sequences for training (need >= 50).")
         sys.exit(1)
 
-    logger.info(f"  Dataset built in {data_time:.1f}s")
-    logger.info(f"  X shape          : {X.shape}")
-    logger.info(f"  y shape          : {y.shape}")
-    logger.info(f"  Sequence length  : {SEQUENCE_LENGTH}")
-    logger.info(f"  Features/step    : {INPUT_SIZE}")
-    logger.info(f"  X range          : [{X.min():.2f}, {X.max():.2f}]")
-    logger.info(f"  y range          : [{y.min():.2f}, {y.max():.2f}]")
-    logger.info(f"  y mean           : {y.mean():.4f}")
-    logger.info(f"  y std            : {y.std():.4f}")
+    log_dataset_stats(X, y, data_time, logger, SEQUENCE_LENGTH, INPUT_SIZE)
 
     # Fit scaler on 2D features
     logger.info("  Fitting StandardScaler on features...")
@@ -137,25 +119,7 @@ def main() -> None:
     gc.collect()
 
     total_time = time.time() - pipeline_t0
-    mins, secs = divmod(int(total_time), 60)
-
-    logger.info("")
-    logger.info("#" * 56)
-    logger.info("#" + " " * 54 + "#")
-    logger.info("#    TRAINING COMPLETE" + " " * 33 + "#")
-    logger.info("#" + " " * 54 + "#")
-    logger.info("#" * 56)
-    logger.info(f"  Sequences      : {len(X):,}")
-    logger.info(f"  Best hidden    : {best_hidden}")
-    logger.info(f"  Best LR        : {best_lr}")
-    logger.info(f"  Val MSE        : {best_val_mse:.6f}")
-    logger.info(f"  Test MAE       : {mae:.3f} km/h")
-    logger.info(f"  Total time     : {mins}m {secs}s")
-    logger.info("-" * 56)
-    logger.info(f"  Model saved    : {models_dir / 'tyre_lstm.pt'}")
-    logger.info(f"  Scaler saved   : {models_dir / 'tyre_scaler.pkl'}")
-    logger.info(f"  Config saved   : {models_dir / 'tyre_config.json'}")
-    logger.info("#" * 56)
+    log_training_complete(len(X), best_hidden, best_lr, best_val_mse, mae, total_time, models_dir, logger)
 
 
 if __name__ == "__main__":

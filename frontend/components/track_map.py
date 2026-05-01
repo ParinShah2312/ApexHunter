@@ -44,158 +44,136 @@ def _interpolate_path_position(
     return (x, y)
 
 
-def render_track_map(
+def _add_mistakes_traces(fig: go.Figure, df_mistakes: pd.DataFrame) -> None:
+    """Add mistake analysis traces to the figure."""
+    df_map = downsample(df_mistakes, max_points=8000)
+
+    fig.add_trace(
+        go.Scattergl(
+            x=df_map["X"],
+            y=df_map["Y"],
+            mode="markers",
+            marker=dict(
+                color=df_map["anomaly_score"].values,
+                colorscale=["#00ff88", "#ffb800", "#ff3a3a"],
+                reversescale=False,
+                cmin=-0.3,
+                cmax=0.3,
+                colorbar=dict(
+                    title="Anomaly Score",
+                    thickness=12,
+                    tickfont=dict(color="#6b7890"),
+                ),
+                size=3,
+                opacity=0.7,
+            ),
+            hovertemplate="Score: %{marker.color:.3f}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
+            name="All points",
+            showlegend=False,
+        )
+    )
+
+    df_mistake_rows = df_mistakes[df_mistakes["is_mistake"] == True]
+    if not df_mistake_rows.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_mistake_rows["X"],
+                y=df_mistake_rows["Y"],
+                mode="markers",
+                marker=dict(
+                    symbol="x",
+                    size=10,
+                    color="#ff3a3a",
+                    line=dict(color="#ff3a3a", width=2),
+                ),
+                name="Mistake",
+                customdata=df_mistake_rows["anomaly_score"].values,
+                hovertemplate="MISTAKE<br>Score: %{customdata:.3f}<extra></extra>",
+            )
+        )
+
+def _add_speed_trace(fig: go.Figure, df_filtered: pd.DataFrame) -> None:
+    """Add the speed-colored track trace to the figure."""
+    df_map = downsample(df_filtered, max_points=8000)
+
+    fig.add_trace(
+        go.Scattergl(
+            x=df_map["X"],
+            y=df_map["Y"],
+            mode="markers",
+            marker=dict(
+                color=df_map["Speed"].values,
+                colorscale=["#ff3a3a", "#ffb800", "#00ff88"],
+                colorbar=dict(
+                    title="Speed (km/h)",
+                    thickness=12,
+                    tickfont=dict(color="#6b7890"),
+                ),
+                size=3,
+                opacity=0.8,
+            ),
+            hovertemplate="Speed: %{marker.color:.1f} km/h<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
+            showlegend=False,
+        )
+    )
+
+def _add_optimal_line_traces(
+    fig: go.Figure,
     df_filtered: pd.DataFrame,
-    mode: str,
-    df_mistakes: Optional[pd.DataFrame],
+    racing_line_data: dict,
     scrub_seconds: float,
-    racing_line_data: Optional[dict] = None,
-    show_optimal_line: bool = False,
-    show_ghost: bool = False
+    show_optimal_line: bool,
+    show_ghost: bool
 ) -> None:
-    """Renders the track map in speed or mistakes mode.
+    """Add optimal line and ghost dot traces to the figure."""
+    astar = racing_line_data.get("algorithms", {}).get("astar", {})
+    if not (astar.get("found", False) and astar.get("path")):
+        return
 
-    Args:
-        df_filtered: DataFrame filtered to current scrub range.
-        mode: "speed" or "mistakes".
-        df_mistakes: Isolation Forest annotated DataFrame, or None.
-        scrub_seconds: Current scrub position in seconds.
-        racing_line_data: JSON output from optimal_line.py or None.
-        show_optimal_line: Whether to draw the A* dashed line.
-        show_ghost: Whether to draw the ghost dot.
-    """
-    fig = go.Figure()
-    show_legend = False
+    path = astar["path"]
 
-    if mode == "mistakes" and df_mistakes is not None:
-        # ── Mistakes Mode ─────────────────────────────────────────────────
-        show_legend = True
-        df_map = downsample(df_mistakes, max_points=8000)
+    if show_optimal_line:
+        opt_x = [p[0] for p in path]
+        opt_y = [p[1] for p in path]
+        fig.add_trace(go.Scatter(
+            x=opt_x,
+            y=opt_y,
+            mode="lines",
+            line=dict(color="#00d4ff", width=1.5, dash="dash"),
+            name="A* Optimal Line",
+            hovertemplate="Optimal line<extra></extra>",
+            opacity=0.8
+        ))
 
-        # Trace 1 — all points colored by anomaly_score
-        fig.add_trace(
-            go.Scattergl(
-                x=df_map["X"],
-                y=df_map["Y"],
-                mode="markers",
-                marker=dict(
-                    color=df_map["anomaly_score"].values,
-                    colorscale=["#00ff88", "#ffb800", "#ff3a3a"],
-                    reversescale=False,
-                    cmin=-0.3,
-                    cmax=0.3,
-                    colorbar=dict(
-                        title="Anomaly Score",
-                        thickness=12,
-                        tickfont=dict(color="#6b7890"),
-                    ),
-                    size=3,
-                    opacity=0.7,
-                ),
-                hovertemplate="Score: %{marker.color:.3f}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-                name="All points",
-                showlegend=False,
-            )
-        )
-
-        # Trace 2 — mistake markers only (no downsampling — sparse and important)
-        df_mistake_rows = df_mistakes[df_mistakes["is_mistake"] == True]
-        if not df_mistake_rows.empty:
-            fig.add_trace(
-                go.Scatter(
-                    x=df_mistake_rows["X"],
-                    y=df_mistake_rows["Y"],
-                    mode="markers",
-                    marker=dict(
-                        symbol="x",
-                        size=10,
-                        color="#ff3a3a",
-                        line=dict(color="#ff3a3a", width=2),
-                    ),
-                    name="Mistake",
-                    customdata=df_mistake_rows["anomaly_score"].values,
-                    hovertemplate="MISTAKE<br>Score: %{customdata:.3f}<extra></extra>",
-                )
-            )
-
-    elif mode == "mistakes" and df_mistakes is None:
-        # Fall back to speed mode and show warning
-        mode = "speed"
-        st.warning("No Isolation Forest output found. Run detect_mistakes.py first.")
-
-    if mode == "speed":
-        # ── Speed Mode ────────────────────────────────────────────────────
-        df_map = downsample(df_filtered, max_points=8000)
-
-        fig.add_trace(
-            go.Scattergl(
-                x=df_map["X"],
-                y=df_map["Y"],
-                mode="markers",
-                marker=dict(
-                    color=df_map["Speed"].values,
-                    colorscale=["#ff3a3a", "#ffb800", "#00ff88"],
-                    colorbar=dict(
-                        title="Speed (km/h)",
-                        thickness=12,
-                        tickfont=dict(color="#6b7890"),
-                    ),
-                    size=3,
-                    opacity=0.8,
-                ),
-                hovertemplate="Speed: %{marker.color:.1f} km/h<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-                showlegend=False,
-            )
-        )
-
-    if show_optimal_line and racing_line_data is not None:
-        astar = racing_line_data.get("algorithms", {}).get("astar", {})
-        if astar.get("found", False) and astar.get("path"):
-            path = astar["path"]
-            opt_x = [p[0] for p in path]
-            opt_y = [p[1] for p in path]
+    if show_ghost and not df_filtered.empty:
+        time_col = "SessionTime" if "SessionTime" in df_filtered.columns else "Time"
+        if pd.api.types.is_timedelta64_dtype(df_filtered[time_col]):
+            min_t = df_filtered[time_col].dt.total_seconds().min()
+            max_t = df_filtered[time_col].dt.total_seconds().max()
+        else:
+            min_t = float(df_filtered[time_col].min())
+            max_t = float(df_filtered[time_col].max())
+            
+        fraction = (scrub_seconds - min_t) / (max_t - min_t) if max_t > min_t else 0.0
+        ghost_pos = _interpolate_path_position(path, fraction)
+        
+        if ghost_pos is not None:
             fig.add_trace(go.Scatter(
-                x=opt_x,
-                y=opt_y,
-                mode="lines",
-                line=dict(color="#00d4ff", width=1.5, dash="dash"),
-                name="A* Optimal Line",
-                hovertemplate="Optimal line<extra></extra>",
-                opacity=0.8
+                x=[ghost_pos[0]],
+                y=[ghost_pos[1]],
+                mode="markers",
+                marker=dict(
+                    size=14,
+                    color="rgba(255,255,255,0.35)",
+                    symbol="circle",
+                    line=dict(color="rgba(255,255,255,0.7)", width=1.5)
+                ),
+                name="Ghost (optimal)",
+                hovertemplate="Ghost position (A* optimal)<extra></extra>"
             ))
 
-    if show_ghost and racing_line_data is not None:
-        astar = racing_line_data.get("algorithms", {}).get("astar", {})
-        if astar.get("found", False) and astar.get("path"):
-            # Compute fraction: where in the session is the scrubber?
-            if not df_filtered.empty:
-                time_col = "SessionTime" if "SessionTime" in df_filtered.columns \
-                           else "Time"
-                if pd.api.types.is_timedelta64_dtype(df_filtered[time_col]):
-                    min_t = df_filtered[time_col].dt.total_seconds().min()
-                    max_t = df_filtered[time_col].dt.total_seconds().max()
-                else:
-                    min_t = float(df_filtered[time_col].min())
-                    max_t = float(df_filtered[time_col].max())
-                fraction = (scrub_seconds - min_t) / (max_t - min_t) \
-                           if max_t > min_t else 0.0
-                ghost_pos = _interpolate_path_position(astar["path"], fraction)
-                if ghost_pos is not None:
-                    fig.add_trace(go.Scatter(
-                        x=[ghost_pos[0]],
-                        y=[ghost_pos[1]],
-                        mode="markers",
-                        marker=dict(
-                            size=14,
-                            color="rgba(255,255,255,0.35)",
-                            symbol="circle",
-                            line=dict(color="rgba(255,255,255,0.7)", width=1.5)
-                        ),
-                        name="Ghost (optimal)",
-                        hovertemplate="Ghost position (A* optimal)<extra></extra>"
-                    ))
-
-    # ── Driver Position Dot ───────────────────────────────────────────────
+def _add_driver_position(fig: go.Figure, df_filtered: pd.DataFrame, scrub_seconds: float) -> None:
+    """Add the driver's current position to the figure based on scrub_seconds."""
     time_col = "SessionTime" if ("SessionTime" in df_filtered.columns and not df_filtered["SessionTime"].isnull().all()) else "Time"
 
     if pd.api.types.is_timedelta64_dtype(df_filtered[time_col]):
@@ -225,7 +203,9 @@ def render_track_map(
             )
         )
 
-    # ── Layout ────────────────────────────────────────────────────────────
+def _build_track_figure(show_legend: bool) -> go.Figure:
+    """Create the base figure layout for the track map."""
+    fig = go.Figure()
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0d1520",
@@ -242,5 +222,47 @@ def render_track_map(
         showlegend=show_legend,
         height=420,
     )
+    return fig
+
+
+def render_track_map(
+    df_filtered: pd.DataFrame,
+    mode: str,
+    df_mistakes: Optional[pd.DataFrame],
+    scrub_seconds: float,
+    racing_line_data: Optional[dict] = None,
+    show_optimal_line: bool = False,
+    show_ghost: bool = False
+) -> None:
+    """Renders the track map in speed or mistakes mode.
+
+    Args:
+        df_filtered: DataFrame filtered to current scrub range.
+        mode: "speed" or "mistakes".
+        df_mistakes: Isolation Forest annotated DataFrame, or None.
+        scrub_seconds: Current scrub position in seconds.
+        racing_line_data: JSON output from optimal_line.py or None.
+        show_optimal_line: Whether to draw the A* dashed line.
+        show_ghost: Whether to draw the ghost dot.
+    """
+    show_legend = False
+
+    if mode == "mistakes" and df_mistakes is not None:
+        show_legend = True
+    elif mode == "mistakes" and df_mistakes is None:
+        mode = "speed"
+        st.warning("No Isolation Forest output found. Run detect_mistakes.py first.")
+
+    fig = _build_track_figure(show_legend=show_legend)
+
+    if mode == "mistakes" and df_mistakes is not None:
+        _add_mistakes_traces(fig, df_mistakes)
+    elif mode == "speed":
+        _add_speed_trace(fig, df_filtered)
+
+    if racing_line_data is not None and (show_optimal_line or show_ghost):
+        _add_optimal_line_traces(fig, df_filtered, racing_line_data, scrub_seconds, show_optimal_line, show_ghost)
+
+    _add_driver_position(fig, df_filtered, scrub_seconds)
 
     st.plotly_chart(fig, width='stretch')

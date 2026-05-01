@@ -1,8 +1,14 @@
-import pandas as pd
-import numpy as np
+"""Batch telemetry cleaning pipeline for ApexHunter.
+Reads raw parquet files, applies domain-specific cleaning (null handling,
+outlier clipping, type downcasting), and writes cleaned parquet output."""
+
 import argparse
-from pathlib import Path
 import gc
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
 from utils import setup_logger, DATA_LAKE_DIR
 
 # Configure logging
@@ -12,16 +18,75 @@ logger = setup_logger(__name__)
 RAW_DATA_DIR = DATA_LAKE_DIR / "season_data"
 CLEAN_DATA_DIR = DATA_LAKE_DIR / "clean_data"
 
-# Create clean data directory if it doesn't exist
-CLEAN_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
 def get_directory_size(directory: Path) -> str:
     """Calculates the total size of files in a directory in MB."""
     total_size = sum(f.stat().st_size for f in directory.rglob('*') if f.is_file())
     return f"{total_size / (1024 * 1024):.2f} MB"
 
+def _synthesize_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 1: Synthesize missing essential columns."""
+    expected_cols = ['Driver', 'Speed', 'RPM', 'Throttle', 'Brake', 'X', 'Y', 'Time', 'SessionTime', 'nGear']
+    for c in expected_cols:
+        if c not in df.columns:
+            if c == 'Driver':
+                df['Driver'] = 'UNKNOWN'
+            elif c in ['Time', 'SessionTime']:
+                df[c] = pd.to_timedelta(np.arange(len(df)), unit='s')
+            elif c == 'nGear':
+                df['nGear'] = 8
+            else:
+                df[c] = 0
+    return df
+
+def _drop_all_null_core_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 2: Drop rows missing all core telemetry."""
+    core_telemetry = ['Speed', 'RPM', 'X', 'Y']
+    cols_to_check = [c for c in core_telemetry if c in df.columns]
+    if cols_to_check:
+        df.dropna(subset=cols_to_check, how='all', inplace=True)
+    return df
+
+def _forward_fill_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 3: Forward fill small gaps in numeric columns."""
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df[numeric_cols] = df[numeric_cols].ffill()
+    return df
+
+def _clip_telemetry_outliers(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 4: Domain specific outlier clipping."""
+    if 'Speed' in df.columns:
+        df['Speed'] = df['Speed'].clip(lower=0, upper=380) # Modern F1 cars max out ~360 km/h
+    if 'RPM' in df.columns:
+        df['RPM'] = df['RPM'].clip(lower=0, upper=15000)   # V6 Hybrid limit
+    if 'Throttle' in df.columns:
+        df['Throttle'] = df['Throttle'].clip(lower=0, upper=100)
+    if 'Brake' in df.columns:
+        df['Brake'] = df['Brake'].clip(lower=0, upper=100)
+    return df
+
+def _downcast_to_float32(df: pd.DataFrame) -> pd.DataFrame:
+    """Step 5: Optimize Memory (Downcast types)."""
+    if 'Speed' in df.columns:
+        df['Speed'] = df['Speed'].astype('float32')
+    if 'RPM' in df.columns:
+        df['RPM'] = df['RPM'].astype('float32')
+    if 'Throttle' in df.columns:
+        df['Throttle'] = df['Throttle'].astype('float32')
+    if 'Brake' in df.columns:
+        df['Brake'] = df['Brake'].astype('float32')
+    if 'X' in df.columns:
+        df['X'] = df['X'].astype('float32')
+    if 'Y' in df.columns:
+        df['Y'] = df['Y'].astype('float32')
+    return df
+
 def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
-    """Loads, cleans, and saves a Single telemetry file."""
+    """Loads, cleans, and saves a Single telemetry file.
+
+    Args:
+        input_file: Path to the raw telemetry file.
+        output_file: Path to save the cleaned telemetry.
+    """
     try:
         df = pd.read_parquet(input_file)
         initial_rows = len(df)
@@ -30,53 +95,21 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
             return
 
         # 1. Essential Columns Check
-        expected_cols = ['Driver', 'Speed', 'RPM', 'Throttle', 'Brake', 'X', 'Y', 'Time', 'SessionTime', 'nGear']
-        for c in expected_cols:
-            if c not in df.columns:
-                if c == 'Driver':
-                    df['Driver'] = 'UNKNOWN'
-                elif c in ['Time', 'SessionTime']:
-                    df[c] = pd.to_timedelta(np.arange(len(df)), unit='s')
-                elif c == 'nGear':
-                    df['nGear'] = 8
-                else:
-                    df[c] = 0
+        df = _synthesize_missing_columns(df)
 
         # 2. Drop Rows Missing Critical Core Telemetry
-        core_telemetry = ['Speed', 'RPM', 'X', 'Y']
-        cols_to_check = [c for c in core_telemetry if c in df.columns]
-        if cols_to_check:
-            df.dropna(subset=cols_to_check, how='all', inplace=True)
+        df = _drop_all_null_core_rows(df)
             
         dropped_rows = initial_rows - len(df)
 
         # 3. Forward Fill Small Gaps (Interpolate missing sensor packets within laps)
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        df[numeric_cols] = df[numeric_cols].ffill()
+        df = _forward_fill_numeric(df)
 
         # 4. Outlier Clipping (Domain Specific Caps)
-        if 'Speed' in df.columns:
-            df['Speed'] = df['Speed'].clip(lower=0, upper=380) # Modern F1 cars max out ~360 km/h
-        if 'RPM' in df.columns:
-            df['RPM'] = df['RPM'].clip(lower=0, upper=15000)   # V6 Hybrid limit
-        if 'Throttle' in df.columns:
-            df['Throttle'] = df['Throttle'].clip(lower=0, upper=100)
-        if 'Brake' in df.columns:
-            df['Brake'] = df['Brake'].clip(lower=0, upper=100)
+        df = _clip_telemetry_outliers(df)
 
         # 5. Optimize Memory (Downcast types)
-        if 'Speed' in df.columns:
-            df['Speed'] = df['Speed'].astype('float32')
-        if 'RPM' in df.columns:
-            df['RPM'] = df['RPM'].astype('float32')
-        if 'Throttle' in df.columns:
-            df['Throttle'] = df['Throttle'].astype('float32')
-        if 'Brake' in df.columns:
-            df['Brake'] = df['Brake'].astype('float32')
-        if 'X' in df.columns:
-            df['X'] = df['X'].astype('float32')
-        if 'Y' in df.columns:
-            df['Y'] = df['Y'].astype('float32')
+        df = _downcast_to_float32(df)
 
         # Save Cleaned Data to Parquet (Better for big data than CSV)
         df.to_parquet(output_file, compression='snappy')
@@ -91,6 +124,8 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
         logger.error(f"Error processing {input_file.name}: {e}")
 
 def main() -> None:
+    """Parse CLI arguments and run telemetry cleaning batch pipeline."""
+    CLEAN_DATA_DIR.mkdir(parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Clean raw telemetry parquet files.")
     parser.add_argument('--input-dir', type=str, default=str(RAW_DATA_DIR), help="Directory containing raw parquet files.")
     parser.add_argument('--output-dir', type=str, default=str(CLEAN_DATA_DIR), help="Directory to save cleaned files.")

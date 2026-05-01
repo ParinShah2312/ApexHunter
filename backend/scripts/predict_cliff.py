@@ -6,13 +6,15 @@ import gc
 import sys
 from pathlib import Path
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
 from utils import setup_logger, DATA_LAKE_DIR, PROJECT_ROOT
-from tyre_data import extract_stints, CLIFF_SPEED_DROP_KMH, LAP_FEATURES
-from tyre_model import INPUT_SIZE, monte_carlo_predict
-from tyre_io import load_model_artifacts, build_prediction_output, save_prediction
+from tyre_data import extract_stints, LAP_FEATURES
+from tyre_model import INPUT_SIZE, monte_carlo_predict, predict_single_stint
+from tyre_io import load_model_artifacts, build_prediction_output, save_prediction, log_prediction_complete
 
 logger = setup_logger(__name__)
 
@@ -80,94 +82,14 @@ def main() -> None:
 
     stint_results = []
     for stint_data in stints_data:
-        stint_index = stint_data["stint_index"]
-        lap_features = pd.DataFrame(stint_data["lap_features"])
-        actual_speeds = lap_features["mean_speed"].tolist()
-        actual_lap_times = lap_features["lap_time_seconds"].tolist()
-        
-        features_np = lap_features[LAP_FEATURES].values.copy()
-        
-        # The first lap is an out-lap (slow). If we feed this slow lap into the LSTM history,
-        # it falsely predicts a cliff. We overwrite lap 1 with lap 2's features for the input sequence.
-        if len(features_np) > 1:
-            features_np[0] = features_np[1]
-        
-        # Pad left with seq_len copies of the first row (now lap 2) to predict all laps smoothly
-        padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
-        
-        # Build padded sequences
-        new_seqs = []
-        for i in range(len(features_np)):
-            new_seqs.append(padded_features[i : i + seq_len])
-            
-        sequences = np.array(new_seqs, dtype=np.float32)
-        
-        seq_2d = sequences.reshape(-1, INPUT_SIZE)
-        seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
-        mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
-        
-        mean_preds_speed = (mean_preds * y_std + y_mean).tolist()
-        lower_speed = (lower * y_std + y_mean).tolist()
-        upper_speed = (upper * y_std + y_mean).tolist()
-
-        # Compute track distance for this stint to convert speed back to lap time accurately
-        valid_pairs = [(s, t) for s, t in zip(actual_speeds, actual_lap_times) if not pd.isna(t) and t > 0]
-        if valid_pairs:
-            track_dist = float(np.mean([s * t for s, t in valid_pairs]))
-        else:
-            track_dist = actual_speeds[0] * 90.0
-
-        def speed_to_time(s): return track_dist / max(s, 1.0)
-
-        predicted_laps = [speed_to_time(s) for s in mean_preds_speed]
-        
-        # Note: upper speed = lower time. We map to confidence_lower and confidence_upper for UI
-        confidence_lower = [speed_to_time(s) for s in upper_speed]
-        confidence_upper = [speed_to_time(s) for s in lower_speed]
-        
-        # Clean actual lap times replacing NaN with None
-        actual_laps_clean = [t if not pd.isna(t) else None for t in actual_lap_times]
-        
-        # Detect cliff based on lap time
-        best_lap_time = min(predicted_laps)
-        best_lap_idx = predicted_laps.index(best_lap_time)
-        cliff_lap = None
-        # Start looking for the cliff AFTER the best lap is set, since the first laps are slow out-laps
-        for i in range(best_lap_idx + 1, len(predicted_laps)):
-            if predicted_laps[i] > best_lap_time + 1.5:  # 1.5s drop-off
-                cliff_lap = i
-                break
-
-        laps_remaining = (len(actual_lap_times) - cliff_lap) if cliff_lap is not None else None
-
-        stint_results.append({
-            "stint_index": stint_index, "n_laps": len(actual_lap_times),
-            "actual_laps": actual_laps_clean, "predicted_laps": predicted_laps,
-            "confidence_upper": confidence_upper, "confidence_lower": confidence_lower,
-            "cliff_lap": cliff_lap, "laps_remaining": laps_remaining,
-        })
+        res = predict_single_stint(stint_data, model, scaler, y_mean, y_std, seq_len)
+        stint_results.append(res)
 
     data = build_prediction_output(str(args.session), args.driver, stint_results)
     save_prediction(data, output_path, logger)
     gc.collect()
 
-    stint_lines = "\n".join(
-        f"   Stint {s['stint_index']+1}: {s['n_laps']} laps, "
-        f"cliff at lap {s['cliff_lap']+1 if s['cliff_lap'] is not None else '—'}, "
-        f"{s['laps_remaining'] if s['laps_remaining'] is not None else '—'} laps remaining"
-        for s in stint_results
-    )
-    logger.info(f"""
-======================================================
-   ApexHunter — Tyre Cliff Prediction Complete
-======================================================
-   Driver        : {args.driver}
-   Session       : {stem}
-   Stints found  : {len(stint_results)}
-{stint_lines}
-======================================================
-   Output: {output_path}
-======================================================""")
+    log_prediction_complete(args.driver, stem, stint_results, output_path, logger)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import numpy as np
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import torch
+
 from sklearn.preprocessing import StandardScaler
 
 from tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE

@@ -131,6 +131,7 @@ def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
 
 
 def load_racing_line(filepath: str) -> Optional[dict]:
+    """Load a racing line JSON. Returns None if file does not exist."""
     if not Path(filepath).exists():
         return None
     try:

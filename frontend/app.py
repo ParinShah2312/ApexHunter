@@ -10,6 +10,7 @@
 
 import streamlit as st
 import pandas as pd
+from typing import Tuple
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -19,9 +20,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Global CSS Injection ──────────────────────────────────────────────────────
-st.markdown(
-    """
+# ── Constants ─────────────────────────────────────────────────────────────────
+_DARK_THEME_CSS: str = """
     <style>
     /* 1. Dark background */
     [data-testid="stAppViewContainer"],
@@ -98,9 +98,21 @@ st.markdown(
         color: #00d4ff;
     }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+"""
+
+def _get_session_time_range(df: pd.DataFrame) -> Tuple[float, float]:
+    """Calculate the minimum and maximum session time in seconds."""
+    time_col = "SessionTime" if "SessionTime" in df.columns else "Time"
+    if pd.api.types.is_timedelta64_dtype(df[time_col]):
+        min_t = float(df[time_col].dt.total_seconds().min())
+        max_t = float(df[time_col].dt.total_seconds().max())
+    else:
+        min_t = float(df[time_col].min())
+        max_t = float(df[time_col].max())
+    return min_t, max_t
+
+# ── Global CSS Injection ──────────────────────────────────────────────────────
+st.markdown(_DARK_THEME_CSS, unsafe_allow_html=True)
 
 import streamlit.components.v1 as components
 
@@ -181,13 +193,7 @@ with tab1:
     # ── Master scrubber at the TOP of Race Intelligence ────────────────────
     st.markdown("**⏱ Session Time — Master Scrubber**")
 
-    time_col = "SessionTime" if "SessionTime" in sel.df_driver.columns else "Time"
-    if pd.api.types.is_timedelta64_dtype(sel.df_driver[time_col]):
-        min_t = float(sel.df_driver[time_col].dt.total_seconds().min())
-        max_t = float(sel.df_driver[time_col].dt.total_seconds().max())
-    else:
-        min_t = float(sel.df_driver[time_col].min())
-        max_t = float(sel.df_driver[time_col].max())
+    min_t, max_t = _get_session_time_range(sel.df_driver)
 
     # Clamp session state value to valid range
     if "scrub_seconds" not in st.session_state:

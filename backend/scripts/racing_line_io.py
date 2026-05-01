@@ -3,6 +3,7 @@ pipeline. Isolates all file I/O operations from the grid and search logic."""
 
 import json
 import logging
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -133,6 +134,16 @@ def build_output(
     }
 
 
+def _path_length_meters(path_coords: List[Tuple[float, float]], scale: float) -> float:
+    """Compute the path length in meters using Euclidean distance."""
+    length_units = 0.0
+    for i in range(len(path_coords) - 1):
+        x1, y1 = path_coords[i]
+        x2, y2 = path_coords[i+1]
+        length_units += math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+    return length_units * scale
+
+
 def compute_time_saved(
     result: SearchResult,
     driver_path_coords: List[Tuple[float, float]],
@@ -171,15 +182,8 @@ def compute_time_saved(
     driver_speeds = [get_nearest_node_speed(pt) for pt in driver_path_coords]
     driver_mean_speed_kmh = sum(driver_speeds) / len(driver_speeds) if driver_speeds else 0.0
 
-    def path_length_m(coords: List[Tuple[float, float]]) -> float:
-        if len(coords) < 2:
-            return 0.0
-        pts = np.array(coords)
-        diffs = np.diff(pts, axis=0)
-        return float(np.linalg.norm(diffs, axis=1).sum()) * scale
-
-    optimal_length = path_length_m(result.path_coords)
-    driver_length = path_length_m(driver_path_coords)
+    optimal_length = _path_length_meters(result.path_coords, scale)
+    driver_length = _path_length_meters(driver_path_coords, scale)
 
     if optimal_mean_speed_kmh <= 0 or driver_mean_speed_kmh <= 0:
         return None
@@ -208,3 +212,49 @@ def save_output(data: dict, output_path: Path, logger: logging.Logger) -> None:
     with open(output_path, "w") as f:
         json.dump(data, f, indent=2)
     logger.info(f"Saved racing line JSON: {output_path}")
+
+
+def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logger) -> pd.DataFrame:
+    """Fetch the fastest lap boundaries for the given driver."""
+    import fastf1
+    try:
+        year = int(df["Year"].iloc[0])
+        round_val = df["Round"].iloc[0]
+        try:
+            round_val = int(round_val)
+        except ValueError:
+            pass # Keep as string if it's a name
+        session_name = df["Session"].iloc[0]
+        
+        session = fastf1.get_session(year, round_val, session_name)
+        session.load(telemetry=False, weather=False, messages=False)
+        lap = session.laps.pick_driver(driver).pick_fastest()
+        start_t = lap["LapStartTime"]
+        end_t = lap["Time"]
+        
+        df_lap = df[(df["SessionTime"] >= start_t) & (df["SessionTime"] <= end_t)]
+        if df_lap.empty:
+            logger.warning("Fastest lap empty in telemetry, falling back to full session.")
+            return df
+        return df_lap
+    except Exception as e:
+        logger.warning(f"Could not fetch fastest lap bounds: {e}. Falling back to full session.")
+        return df
+
+
+def log_racing_line_complete(args, stem, grid, scale, astar_r, astar_ts, dijkstra_r, dijkstra_ts, bfs_r, astar_cost_bfs, bfs_ts, output_path, logger):
+    logger.info(f"""======================================================
+   ApexHunter - Racing Line - Run Complete
+======================================================
+   Driver         : {args.driver}
+   Session        : {stem}
+   Grid nodes     : {len(grid):,}
+   Resolution     : {args.resolution}
+   Scale          : {scale:.6f} m/unit
+------------------------------------------------------
+   A*        cost={astar_r.total_cost:.3f}  nodes={astar_r.nodes_expanded:,}  time={astar_r.compute_time_s:.3f}s  saved={astar_ts}s
+   Dijkstra  cost={dijkstra_r.total_cost:.3f}  nodes={dijkstra_r.nodes_expanded:,}  time={dijkstra_r.compute_time_s:.3f}s  saved={dijkstra_ts}s
+   BFS       cost={astar_cost_bfs:.3f}  nodes={bfs_r.nodes_expanded:,}  time={bfs_r.compute_time_s:.3f}s  saved={bfs_ts}s
+======================================================
+   Output: {output_path}
+======================================================""")

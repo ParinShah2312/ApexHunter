@@ -14,40 +14,30 @@ from plotly.subplots import make_subplots
 
 from components.data_loader import downsample
 
+def _get_time_col(df: pd.DataFrame) -> str:
+    """Return the primary time column name."""
+    if "SessionTime" in df.columns and not df["SessionTime"].isnull().all():
+        return "SessionTime"
+    return "Time"
 
-def render_telemetry(
-    df_driver: pd.DataFrame,
-    driver_name: str,
-    driver_number: str,
-    df_compare: Optional[pd.DataFrame] = None,
-    compare_number: Optional[str] = None,
-) -> Optional[Tuple[pd.DataFrame, str]]:
-    """Main entry point: renders the telemetry playback section.
+def _compute_brake_overlap(df: pd.DataFrame) -> float:
+    """Return percentage of rows where Brake > 0 AND Throttle > 0."""
+    if len(df) == 0:
+        return 0.0
+    return float(((df["Brake"] > 0) & (df["Throttle"] > 0)).sum() / len(df) * 100)
 
-    Returns:
-        Tuple of (filtered DataFrame, hover template) for use by the track map,
-        or None if empty.
-    """
-    if df_driver.empty:
-        st.warning(f"No telemetry data found for driver {driver_name} (#{driver_number}).")
-        st.stop()
-        return None
-
-    # ── Metric Cards Row ──────────────────────────────────────────────────
-    scrub_val = st.session_state.get("scrub_seconds", 0.0)
-    mins, secs = divmod(scrub_val, 60)
+def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
+    """Render the three KPI metric cards row."""
+    hours, remainder = divmod(scrub_seconds, 3600)
+    mins, secs = divmod(remainder, 60)
     ms = (secs - int(secs)) * 1000
-    time_str = f"{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+    if hours > 0:
+        time_str = f"{int(hours):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+    else:
+        time_str = f"{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
 
-    top_speed = float(df_driver["Speed"].max())
-
-    overlap_pct = 0.0
-    if len(df_driver) > 0:
-        overlap_pct = (
-            ((df_driver["Brake"] > 0) & (df_driver["Throttle"] > 0)).sum()
-            / len(df_driver)
-            * 100
-        )
+    top_speed = float(df_driver["Speed"].max()) if not df_driver.empty else 0.0
+    overlap_pct = _compute_brake_overlap(df_driver)
 
     mc1, mc2, mc3 = st.columns(3)
     with mc1:
@@ -58,51 +48,15 @@ def render_telemetry(
         st.metric("Brake Overlap", f"{overlap_pct:.1f}%")
         st.caption("lower is better")
 
-    # ── Time Scrubber ─────────────────────────────────────────────────────
-    time_col = "SessionTime" if ("SessionTime" in df_driver.columns and not df_driver["SessionTime"].isnull().all()) else "Time"
-
-    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
-        min_t = float(df_driver[time_col].dt.total_seconds().min())
-        max_t = float(df_driver[time_col].dt.total_seconds().max())
-    else:
-        min_t = float(df_driver[time_col].min())
-        max_t = float(df_driver[time_col].max())
-
-    def _sync_scrub():
-        st.session_state["scrub_seconds"] = st.session_state["telemetry_scrub_seconds"]
-
-    # Clamp scrub value to valid range
-    scrub_init = st.session_state.get("scrub_seconds", max_t)
-    scrub_init = max(min_t, min(scrub_init, max_t))
-
-    scrub = st.slider(
-        "Session Time",
-        min_value=min_t,
-        max_value=max_t,
-        value=scrub_init,
-        format="%.1f s",
-        key="telemetry_scrub_seconds",
-        on_change=_sync_scrub,
-    )
-
-    # Filter to scrub position
-    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
-        df_filtered = df_driver[df_driver[time_col].dt.total_seconds() <= scrub].copy()
-    else:
-        df_filtered = df_driver[df_driver[time_col] <= scrub].copy()
-
-    if df_filtered.empty:
-        st.warning("No data in selected time range.")
-        return None
-
-    # ── Build Five-Panel Chart ────────────────────────────────────────────
-    df_chart = downsample(df_filtered)
-
-    if pd.api.types.is_timedelta64_dtype(df_chart[time_col]):
-        x_data = df_chart[time_col].dt.total_seconds()
-    else:
-        x_data = df_chart[time_col]
-
+def _build_telemetry_figure(
+    df_chart: pd.DataFrame,
+    x_data: pd.Series,
+    driver_number: str,
+    df_compare_chart: Optional[pd.DataFrame],
+    compare_number: Optional[str],
+    scrub_val: float
+) -> go.Figure:
+    """Build the 5-panel Plotly subplot figure."""
     fig = make_subplots(
         rows=5,
         cols=1,
@@ -111,7 +65,7 @@ def render_telemetry(
         subplot_titles=("Speed (km/h)", "Throttle %", "Brake %", "Gear", "RPM"),
     )
 
-    # Primary driver traces  (row, column, color, fillcolor, fill, mode, line_shape, hovertemplate)
+    # Primary driver traces
     trace_configs = [
         (1, "Speed",    "#00d4ff", "rgba(0,212,255,0.09)", "tozeroy", "lines", None,
          "At <b>%{x:.1f}s</b>, the car was travelling at <b>%{y:.1f} km/h</b><extra></extra>"),
@@ -142,51 +96,42 @@ def render_telemetry(
         )
 
     # Compare driver traces
-    if df_compare is not None and compare_number is not None:
-        # Filter compare to same time window
-        if pd.api.types.is_timedelta64_dtype(df_compare[time_col]):
-            df_comp_filt = df_compare[df_compare[time_col].dt.total_seconds() <= scrub].copy()
+    if df_compare_chart is not None and compare_number is not None:
+        time_col = _get_time_col(df_compare_chart)
+        if pd.api.types.is_timedelta64_dtype(df_compare_chart[time_col]):
+            x_comp = df_compare_chart[time_col].dt.total_seconds()
         else:
-            df_comp_filt = df_compare[df_compare[time_col] <= scrub].copy()
+            x_comp = df_compare_chart[time_col]
 
-        if not df_comp_filt.empty:
-            df_comp_chart = downsample(df_comp_filt)
+        comp_configs = [
+            (1, "Speed",    "rgba(0,212,255,0.53)", "lines", None,
+             "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:.1f} km/h</b><extra></extra>"),
+            (2, "Throttle", "rgba(0,255,136,0.53)", "lines", None,
+             "[Compare] At <b>%{x:.1f}s</b> — throttle <b>%{y:.0f}%</b><extra></extra>"),
+            (3, "Brake",    "rgba(255,58,58,0.53)", "lines", None,
+             "[Compare] At <b>%{x:.1f}s</b> — brake <b>%{y:.0f}%</b><extra></extra>"),
+            (4, "nGear",    "rgba(107,120,144,0.53)", "lines", "hv",
+             "[Compare] At <b>%{x:.1f}s</b> — <b>gear %{y:.0f}</b><extra></extra>"),
+            (5, "RPM",      "rgba(168,85,247,0.53)", "lines", None,
+             "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:,.0f} RPM</b><extra></extra>"),
+        ]
 
-            if pd.api.types.is_timedelta64_dtype(df_comp_chart[time_col]):
-                x_comp = df_comp_chart[time_col].dt.total_seconds()
-            else:
-                x_comp = df_comp_chart[time_col]
+        for row, col_name, color, mode, line_shape, htpl in comp_configs:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_comp,
+                    y=df_compare_chart[col_name],
+                    mode=mode,
+                    opacity=0.6,
+                    line=dict(color=color, dash="dash", shape=line_shape) if line_shape else dict(color=color, dash="dash"),
+                    name=f"{col_name} #{compare_number}",
+                    hovertemplate=htpl,
+                ),
+                row=row,
+                col=1,
+            )
 
-            comp_configs = [
-                (1, "Speed",    "rgba(0,212,255,0.53)", "lines", None,
-                 "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:.1f} km/h</b><extra></extra>"),
-                (2, "Throttle", "rgba(0,255,136,0.53)", "lines", None,
-                 "[Compare] At <b>%{x:.1f}s</b> — throttle <b>%{y:.0f}%</b><extra></extra>"),
-                (3, "Brake",    "rgba(255,58,58,0.53)", "lines", None,
-                 "[Compare] At <b>%{x:.1f}s</b> — brake <b>%{y:.0f}%</b><extra></extra>"),
-                (4, "nGear",    "rgba(107,120,144,0.53)", "lines", "hv",
-                 "[Compare] At <b>%{x:.1f}s</b> — <b>gear %{y:.0f}</b><extra></extra>"),
-                (5, "RPM",      "rgba(168,85,247,0.53)", "lines", None,
-                 "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:,.0f} RPM</b><extra></extra>"),
-            ]
-
-            for row, col_name, color, mode, line_shape, htpl in comp_configs:
-                fig.add_trace(
-                    go.Scatter(
-                        x=x_comp,
-                        y=df_comp_chart[col_name],
-                        mode=mode,
-                        opacity=0.6,
-                        line=dict(color=color, dash="dash", shape=line_shape) if line_shape else dict(color=color, dash="dash"),
-                        name=f"{col_name} #{compare_number}",
-                        hovertemplate=htpl,
-                    ),
-                    row=row,
-                    col=1,
-                )
-
-    # Scrubber vertical line on all five subplots
-    scrub_val = st.session_state.get("scrub_seconds", float(max_t))
+    # Scrubber vertical line
     shapes = []
     for row in range(1, 6):
         xref = "x" if row == 1 else f"x{row}"
@@ -210,11 +155,10 @@ def render_telemetry(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0f1217",
         font=dict(color="#6b7890", size=11),
-        showlegend=True if df_compare is not None else False,
+        showlegend=True if df_compare_chart is not None else False,
         margin=dict(t=40, b=20, l=50, r=20),
     )
 
-    # Style grid lines for all axes
     for i in range(1, 6):
         xaxis_key = f"xaxis{i}" if i > 1 else "xaxis"
         yaxis_key = f"yaxis{i}" if i > 1 else "yaxis"
@@ -225,7 +169,96 @@ def render_telemetry(
             }
         )
 
+    return fig
+
+def render_telemetry(
+    df_driver: pd.DataFrame,
+    driver_name: str,
+    driver_number: str,
+    df_compare: Optional[pd.DataFrame] = None,
+    compare_number: Optional[str] = None,
+) -> Optional[Tuple[pd.DataFrame, str]]:
+    """Main entry point: renders the telemetry playback section.
+
+    Returns:
+        Tuple of (filtered DataFrame, hover template) for use by the track map,
+        or None if empty.
+    """
+    if df_driver.empty:
+        st.warning(f"No telemetry data found for driver {driver_name} (#{driver_number}).")
+        st.stop()
+        return None
+
+    scrub_val = st.session_state.get("scrub_seconds", 0.0)
+    
+    # Render KPI Cards
+    _render_metric_cards(df_driver, scrub_val)
+
+    # Time Scrubber
+    time_col = _get_time_col(df_driver)
+
+    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
+        min_t = float(df_driver[time_col].dt.total_seconds().min())
+        max_t = float(df_driver[time_col].dt.total_seconds().max())
+    else:
+        min_t = float(df_driver[time_col].min())
+        max_t = float(df_driver[time_col].max())
+
+    def _sync_scrub():
+        st.session_state["scrub_seconds"] = st.session_state["telemetry_scrub_seconds"]
+
+    scrub_init = st.session_state.get("scrub_seconds", max_t)
+    scrub_init = max(min_t, min(scrub_init, max_t))
+
+    scrub = st.slider(
+        "Session Time",
+        min_value=min_t,
+        max_value=max_t,
+        value=scrub_init,
+        format="%.1f s",
+        key="telemetry_scrub_seconds",
+        on_change=_sync_scrub,
+    )
+
+    # Filter to scrub position
+    if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
+        df_filtered = df_driver[df_driver[time_col].dt.total_seconds() <= scrub].copy()
+    else:
+        df_filtered = df_driver[df_driver[time_col] <= scrub].copy()
+
+    if df_filtered.empty:
+        st.warning("No data in selected time range.")
+        return None
+
+    # Downsample and prepare chart data
+    df_chart = downsample(df_filtered)
+    if pd.api.types.is_timedelta64_dtype(df_chart[time_col]):
+        x_data = df_chart[time_col].dt.total_seconds()
+    else:
+        x_data = df_chart[time_col]
+
+    # Prepare compare data if needed
+    df_compare_chart = None
+    if df_compare is not None and compare_number is not None:
+        if pd.api.types.is_timedelta64_dtype(df_compare[time_col]):
+            df_comp_filt = df_compare[df_compare[time_col].dt.total_seconds() <= scrub].copy()
+        else:
+            df_comp_filt = df_compare[df_compare[time_col] <= scrub].copy()
+
+        if not df_comp_filt.empty:
+            df_compare_chart = downsample(df_comp_filt)
+
+    # Build and render figure
+    fig = _build_telemetry_figure(
+        df_chart=df_chart,
+        x_data=x_data,
+        driver_number=driver_number,
+        df_compare_chart=df_compare_chart,
+        compare_number=compare_number,
+        scrub_val=scrub_val
+    )
     st.plotly_chart(fig, width='stretch')
 
     hover_template = "Speed: %{y:.1f} km/h<extra></extra>"
     return (df_filtered, hover_template)
+

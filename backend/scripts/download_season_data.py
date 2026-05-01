@@ -1,22 +1,28 @@
+"""Season data downloader for ApexHunter.
+Fetches F1 telemetry via FastF1 for configured seasons and saves
+per-session parquet files to the data lake."""
+
+from pathlib import Path
+from typing import Any, List, Optional
+
 import fastf1
 import pandas as pd
-from typing import List
-from pathlib import Path
-from utils import setup_logger, DATA_LAKE_DIR, CACHE_DIR, CONFIG
+
+from utils import CACHE_DIR, CONFIG, DATA_LAKE_DIR, setup_logger
 
 # Configure logging
 logger = setup_logger(__name__)
 
 # Constants
 SEASONS: List[int] = CONFIG.get("seasons", [2023, 2024])
-DATA_LAKE_DIR = DATA_LAKE_DIR / "season_data"
+SEASON_DATA_DIR: Path = DATA_LAKE_DIR / "season_data"
 
 def setup_directories() -> None:
     """Creates necessary directories for data storage and caching."""
-    DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
+    SEASON_DATA_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(exist_ok=True)
     fastf1.Cache.enable_cache(CACHE_DIR)
-    logger.info(f"Data lake directory: {DATA_LAKE_DIR}")
+    logger.info(f"Data lake directory: {SEASON_DATA_DIR}")
     logger.info(f"Cache directory: {CACHE_DIR}")
 
 def get_directory_size(directory: Path) -> str:
@@ -29,10 +35,38 @@ def get_directory_size(directory: Path) -> str:
     size_mb = total_size / (1024 * 1024)
     return f"{size_mb:.2f} MB"
 
+def _process_driver(session: Any, driver: str, round_num: int, session_type: str, year: int) -> Optional[pd.DataFrame]:
+    """Helper to process telemetry for a single driver."""
+    try:
+        driver_laps = session.laps.pick_drivers(driver)
+        if driver_laps.empty:
+            return None
+        
+        # Get telemetry
+        telemetry = driver_laps.get_telemetry()
+        
+        # Add identifiers
+        telemetry['Driver'] = driver
+        telemetry['Round'] = round_num
+        telemetry['Session'] = session_type
+        telemetry['Year'] = year
+        
+        # Keep core columns
+        columns_to_keep = ['Date', 'SessionTime', 'Speed', 'RPM', 'nGear', 'Throttle', 'Brake', 'X', 'Y', 'Z', 'Driver', 'Round', 'Session', 'Year']
+        # Filter columns that exist
+        existing_cols = [col for col in columns_to_keep if col in telemetry.columns]
+        telemetry = telemetry[existing_cols]
+
+        return telemetry
+    
+    except Exception as e:
+        logger.warning(f"Failed to load driver {driver} in {year} Round {round_num} {session_type}: {e}")
+        return None
+
 def process_session(year: int, round_num: int, session_type: str) -> None:
     """Downloads and processes data for a specific round and session."""
     file_name = f"{year}_{round_num}_{session_type}.parquet"
-    file_path = DATA_LAKE_DIR / file_name
+    file_path = SEASON_DATA_DIR / file_name
 
     if file_path.exists():
         logger.info(f"Skipping {file_name} (already exists)")
@@ -50,31 +84,9 @@ def process_session(year: int, round_num: int, session_type: str) -> None:
         logger.info(f"Processing {len(drivers)} drivers...")
 
         for driver in drivers:
-            try:
-                driver_laps = session.laps.pick_drivers(driver)
-                if driver_laps.empty:
-                    continue
-                
-                # Get telemetry
-                telemetry = driver_laps.get_telemetry()
-                
-                # Add identifiers
-                telemetry['Driver'] = driver
-                telemetry['Round'] = round_num
-                telemetry['Session'] = session_type
-                telemetry['Year'] = year
-                
-                # Keep core columns
-                columns_to_keep = ['Date', 'SessionTime', 'Speed', 'RPM', 'nGear', 'Throttle', 'Brake', 'X', 'Y', 'Z', 'Driver', 'Round', 'Session', 'Year']
-                # Filter columns that exist
-                existing_cols = [col for col in columns_to_keep if col in telemetry.columns]
-                telemetry = telemetry[existing_cols]
-
+            telemetry = _process_driver(session, driver, round_num, session_type, year)
+            if telemetry is not None:
                 all_drivers_data.append(telemetry)
-            
-            except Exception as e:
-                logger.warning(f"Failed to load driver {driver} in {year} Round {round_num} {session_type}: {e}")
-                continue
 
         if not all_drivers_data:
             logger.warning(f"No data found for {year} Round {round_num} {session_type}")
@@ -113,11 +125,11 @@ def main() -> None:
                 process_session(year, round_num, session_type)
                 
                 # Monitor size
-                current_size = get_directory_size(DATA_LAKE_DIR)
+                current_size = get_directory_size(SEASON_DATA_DIR)
                 logger.info(f"Current Data Lake Size: {current_size}")
 
     logger.info("Download complete.")
-    final_size = get_directory_size(DATA_LAKE_DIR)
+    final_size = get_directory_size(SEASON_DATA_DIR)
     logger.info(f"Final Data Lake Size: {final_size}")
 
 if __name__ == "__main__":

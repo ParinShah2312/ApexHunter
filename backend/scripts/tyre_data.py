@@ -4,7 +4,7 @@ Converts raw telemetry into per-lap feature sequences."""
 import gc
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import fastf1
 import numpy as np
@@ -31,11 +31,23 @@ CLIFF_SPEED_DROP_KMH: float = 2.0
 
 
 def extract_stints(
-    driver_laps: pd.DataFrame,
-    telemetry_df: pd.DataFrame,
-    logger: logging.Logger,
+    driver_laps: pd.DataFrame, telemetry: pd.DataFrame, logger: logging.Logger
 ) -> List[dict]:
-    """Extract sequences of laps for each stint using FastF1 lap markers."""
+    """Segment a driver's session into individual tyre stints and aggregate lap-level features.
+
+    A new stint is defined when the Compound or Stint number changes.
+
+    Args:
+        driver_laps: FastF1 laps DataFrame for a single driver.
+        telemetry: Cleaned 10Hz telemetry for that driver.
+        logger: Logger instance.
+
+    Returns:
+        List of dicts, where each dict represents a stint and contains:
+        - stint_index: int, index of the stint
+        - compound: str, tyre compound
+        - lap_features: List[dict], lap-level aggregated features
+    """
     stint_results = []
     
     # Sort laps just in case
@@ -49,8 +61,8 @@ def extract_stints(
             end_time = lap["Time"]
             
             # Slice telemetry for this lap
-            mask = (telemetry_df["SessionTime"] >= start_time) & (telemetry_df["SessionTime"] <= end_time)
-            lap_tel = telemetry_df[mask]
+            mask = (telemetry["SessionTime"] >= start_time) & (telemetry["SessionTime"] <= end_time)
+            lap_tel = telemetry[mask]
             
             if len(lap_tel) < 5:
                 continue
@@ -111,11 +123,60 @@ def extract_stints(
     return stint_results
 
 
+def _process_single_file(
+    file_path: Path, logger: logging.Logger
+) -> Tuple[List[np.ndarray], List[float]]:
+    """Process a single parquet file and extract sequences and targets."""
+    X_list = []
+    y_list = []
+
+    try:
+        df = pd.read_parquet(file_path)
+    except Exception as e:
+        logger.warning(f"Failed to read parquet {file_path.name}: {e}")
+        return [], []
+
+    drivers = df["Driver"].unique()
+    if len(drivers) == 0:
+        return [], []
+
+    stem = file_path.stem
+    try:
+        parts = stem.split("_")
+        year, round_num, session_type = int(parts[0]), int(parts[1]), parts[2]
+        session_f1 = fastf1.get_session(year, round_num, session_type)
+        session_f1.load(telemetry=False, weather=False)
+        f1_laps = session_f1.laps
+    except Exception as e:
+        logger.warning(f"Failed to load fastf1 laps for {stem}: {e}")
+        return [], []
+
+    for driver in drivers:
+        df_driver = df[df["Driver"] == driver].copy()
+        df_driver.sort_values("SessionTime", inplace=True)
+        df_driver.reset_index(drop=True, inplace=True)
+
+        try:
+            driver_laps = f1_laps.pick_drivers(driver)
+            if len(driver_laps) == 0:
+                continue
+        except Exception:
+            continue
+
+        stints = extract_stints(driver_laps, df_driver, logger)
+        for stint_data in stints:
+            X_list.extend(stint_data["sequences"])
+            y_list.extend(stint_data["targets"])
+
+    return X_list, y_list
+
+
 def build_training_dataset(
     sessions_dir: Path,
     seasons: List[str],
     logger: logging.Logger,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Aggregate sequences and targets across all sessions in the given seasons."""
     files = []
     for year in seasons:
         files += list(sessions_dir.glob(f"{year}_*_R.parquet"))
@@ -132,36 +193,9 @@ def build_training_dataset(
     fastf1.Cache.enable_cache(str(cache_dir))
 
     for filepath in files:
-        try:
-            logger.info(f"Processing {filepath.name}...")
-            parts = filepath.stem.split("_")
-            year, round_num, session_type = int(parts[0]), int(parts[1]), parts[2]
-            
-            session_f1 = fastf1.get_session(year, round_num, session_type)
-            session_f1.load(telemetry=False, weather=False)
-            f1_laps = session_f1.laps
-            
-            df = pd.read_parquet(filepath)
-
-            for driver in df["Driver"].unique():
-                df_driver = df[df["Driver"] == driver].copy()
-                try:
-                    driver_laps = f1_laps.pick_drivers(driver)
-                    if len(driver_laps) == 0:
-                        continue
-                except Exception:
-                    continue
-                    
-                stints = extract_stints(driver_laps, df_driver, logger)
-                
-                for stint_data in stints:
-                    all_sequences.extend(stint_data["sequences"])
-                    all_targets.extend(stint_data["targets"])
-
-        except Exception as e:
-            logger.error(f"Failed to process {filepath.name}: {e}")
-            continue
-
+        X_file, y_file = _process_single_file(filepath, logger)
+        all_sequences.extend(X_file)
+        all_targets.extend(y_file)
         gc.collect()
 
     if len(all_sequences) == 0:

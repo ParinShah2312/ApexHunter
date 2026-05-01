@@ -7,14 +7,12 @@ import gc
 import sys
 from pathlib import Path
 
-from racing_line_grid import DEFAULT_GRID_RESOLUTION, build_adjacency, build_grid, compute_coordinate_scale, find_start_end_nodes, get_nearest_node
-from racing_line_io import build_output, compute_time_saved, load_and_validate, save_output
-from racing_line_search import astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, SearchResult
+from racing_line_io import build_output, compute_time_saved, load_and_validate, save_output, fetch_fastest_lap_bounds, log_racing_line_complete
+from racing_line_grid import DEFAULT_GRID_RESOLUTION, build_adjacency, build_grid, compute_coordinate_scale, find_start_end_nodes, get_nearest_node, get_node_for_row
+from racing_line_search import astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, SearchResult, run_full_lap
 from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)
-
-
 def run_pipeline(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir) if args.output_dir else DATA_LAKE_DIR / "racing_lines"
     stem = Path(args.session).stem
@@ -24,8 +22,6 @@ def run_pipeline(args: argparse.Namespace) -> None:
     if output_path.exists() and not args.force:
         logger.info("Already processed. Use --force to re-run.")
         return
-
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         df = load_and_validate(Path(args.session), args.driver, logger)
@@ -41,30 +37,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     adjacency = build_adjacency(grid)
     start, end = find_start_end_nodes(grid, df, args.resolution, adjacency)
 
-    import fastf1
-    # Find the fastest lap time bounds using fastf1
-    try:
-        year = int(df["Year"].iloc[0])
-        round_val = df["Round"].iloc[0]
-        try:
-            round_val = int(round_val)
-        except ValueError:
-            pass # Keep as string if it's a name
-        session_name = df["Session"].iloc[0]
-        
-        session = fastf1.get_session(year, round_val, session_name)
-        session.load(telemetry=False, weather=False, messages=False)
-        lap = session.laps.pick_driver(args.driver).pick_fastest()
-        start_t = lap["LapStartTime"]
-        end_t = lap["Time"]
-        
-        df_lap = df[(df["SessionTime"] >= start_t) & (df["SessionTime"] <= end_t)]
-        if df_lap.empty:
-            logger.warning("Fastest lap empty in telemetry, falling back to full session.")
-            df_lap = df
-    except Exception as e:
-        logger.warning(f"Could not fetch fastest lap bounds: {e}. Falling back to full session.")
-        df_lap = df
+    df_lap = fetch_fastest_lap_bounds(df, args.driver, logger)
 
     # Subsample the telemetry for the driver_path field using only the fastest lap
     df_sub = df_lap.sort_values("SessionTime").iloc[::10]
@@ -72,63 +45,23 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     x_min = df["X"].min()
     y_min = df["Y"].min()
-    def get_node_for_row(row):
-        i = int((row.X - x_min) / args.resolution)
-        j = int((row.Y - y_min) / args.resolution)
-        if (i, j) in grid: return (i, j)
-        return get_nearest_node(grid, i, j)
 
     if not df_lap.empty:
         n = len(df_lap)
         nodes = [
-            get_node_for_row(df_lap.iloc[0]),
-            get_node_for_row(df_lap.iloc[n // 4]),
-            get_node_for_row(df_lap.iloc[n // 2]),
-            get_node_for_row(df_lap.iloc[3 * n // 4]),
-            get_node_for_row(df_lap.iloc[-1])
+            get_node_for_row(df_lap.iloc[0], x_min, y_min, args.resolution, grid),
+            get_node_for_row(df_lap.iloc[n // 4], x_min, y_min, args.resolution, grid),
+            get_node_for_row(df_lap.iloc[n // 2], x_min, y_min, args.resolution, grid),
+            get_node_for_row(df_lap.iloc[3 * n // 4], x_min, y_min, args.resolution, grid),
+            get_node_for_row(df_lap.iloc[-1], x_min, y_min, args.resolution, grid)
         ]
     else:
         start, end = find_start_end_nodes(grid, df, args.resolution, adjacency)
         nodes = [start, end]
 
-    def run_full_lap(search_func):
-        if len(nodes) == 2:
-            return search_func(grid, adjacency, nodes[0], nodes[1], logger)
-            
-        results = []
-        for i in range(len(nodes) - 1):
-            res = search_func(grid, adjacency, nodes[i], nodes[i+1], logger)
-            if not res.found:
-                return res # Failed segment
-            results.append(res)
-            
-        # Stitch all results together
-        final_coords = results[0].path_coords
-        final_keys = results[0].path_keys
-        total_cost = results[0].total_cost
-        total_expanded = results[0].nodes_expanded
-        total_time = results[0].compute_time_s
-        
-        for r in results[1:]:
-            final_coords += r.path_coords[1:]
-            final_keys += r.path_keys[1:]
-            total_cost += r.total_cost
-            total_expanded += r.nodes_expanded
-            total_time += r.compute_time_s
-            
-        return SearchResult(
-            algorithm=results[0].algorithm,
-            path_coords=final_coords,
-            path_keys=final_keys,
-            total_cost=total_cost,
-            nodes_expanded=total_expanded,
-            compute_time_s=total_time,
-            found=True
-        )
-
-    astar_r = run_full_lap(astar)
-    dijkstra_r = run_full_lap(dijkstra)
-    bfs_r = run_full_lap(bfs)
+    astar_r = run_full_lap(astar, nodes, grid, adjacency, logger)
+    dijkstra_r = run_full_lap(dijkstra, nodes, grid, adjacency, logger)
+    bfs_r = run_full_lap(bfs, nodes, grid, adjacency, logger)
     gc.collect()
 
     astar_cost_bfs = compute_path_cost_weighted(bfs_r.path_keys, grid, adjacency) if bfs_r.found else 0.0
@@ -150,21 +83,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     save_output(data, output_path, logger)
     gc.collect()
 
-    print(f"""======================================================
-   ApexHunter - Racing Line - Run Complete
-======================================================
-   Driver         : {args.driver}
-   Session        : {stem}
-   Grid nodes     : {len(grid):,}
-   Resolution     : {args.resolution}
-   Scale          : {scale:.6f} m/unit
-------------------------------------------------------
-   A*        cost={astar_r.total_cost:.3f}  nodes={astar_r.nodes_expanded:,}  time={astar_r.compute_time_s:.3f}s  saved={astar_ts}s
-   Dijkstra  cost={dijkstra_r.total_cost:.3f}  nodes={dijkstra_r.nodes_expanded:,}  time={dijkstra_r.compute_time_s:.3f}s  saved={dijkstra_ts}s
-   BFS       cost={astar_cost_bfs:.3f}  nodes={bfs_r.nodes_expanded:,}  time={bfs_r.compute_time_s:.3f}s  saved={bfs_ts}s
-======================================================
-   Output: {output_path}
-======================================================""")
+    log_racing_line_complete(args, stem, grid, scale, astar_r, astar_ts, dijkstra_r, dijkstra_ts, bfs_r, astar_cost_bfs, bfs_ts, output_path, logger)
 
 
 def main() -> None:
