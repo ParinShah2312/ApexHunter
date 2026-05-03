@@ -12,3 +12,5 @@ torch
 ruff
 scikit-learn
 pyarrow
+pymongo
+pyspark

@@ -167,6 +167,7 @@ from components.cv_feed import render_cv_feed
 from components.ai_analysis import render_ai_analysis
 from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line, load_tyre_prediction
 from components.racing_line import render_racing_line
+from components.bigdata_tab import render_bigdata_tab
 
 # ── Step 1: Sidebar ──────────────────────────────────────────────────────────
 sel = render_sidebar()
@@ -181,11 +182,12 @@ tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 render_header_bar(sel, meta)
 
 # ── Step 4: Tabs ──────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏎 Race Intelligence",
     "📊 Telemetry",
     "🧠 AI Analysis",
-    "🛣 Racing Line"
+    "🛣 Racing Line",
+    "🗄️ Big Data"
 ])
 
 # ── Tab 1: Race Intelligence ─────────────────────────────────────────────────
@@ -283,3 +285,6 @@ with tab4:
         driver_number=sel.driver_number,
         df_full=sel.df_full
     )
+
+with tab5:
+    render_bigdata_tab(df_full=sel.df_full)
