@@ -57,11 +57,11 @@ def run_pipeline_once():
         output_dir=str(output_dir),
         force=False
     )
-    
+
     run_pipeline(args)
-    
+
     expected_output_path = output_dir / "synthetic_session_44_racing_line.json"
-    
+
     with open(expected_output_path, "r") as f:
         data = json.load(f)
 
@@ -74,7 +74,7 @@ def run_pipeline_once():
         "json_data": data,
         "args": args
     }
-    
+
     return _FIXTURE_CACHE["data"]
 
 
@@ -136,11 +136,11 @@ class TestRacingLinePipeline(unittest.TestCase):
         mtime_before = self.output_path.stat().st_mtime
         import time
         time.sleep(0.01)  # Ensure time ticks forward for mtime resolution in some OS
-        
+
         args_force = argparse.Namespace(**vars(self.args))
         args_force.force = True
         run_pipeline(args_force)
-        
+
         mtime_after = self.output_path.stat().st_mtime
         self.assertNotEqual(mtime_before, mtime_after)
 

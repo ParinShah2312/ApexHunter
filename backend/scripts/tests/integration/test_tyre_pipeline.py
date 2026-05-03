@@ -109,7 +109,7 @@ def run_full_pipeline_once() -> dict:
             "LapTime": pd.Timedelta(seconds=12)
         })
     fake_laps_df = pd.DataFrame(fake_laps_data)
-    
+
     mock_session = mock.MagicMock()
     mock_session.laps.pick_drivers.return_value = fake_laps_df
 
@@ -199,14 +199,14 @@ def run_full_pipeline_once() -> dict:
         stint_index = stint_data["stint_index"]
         lap_features = pd.DataFrame(stint_data["lap_features"])
         actual_speeds = lap_features["mean_speed"].tolist()
-        
+
         # We need to build padded sequences for the test
         from tyre_data import LAP_FEATURES
         features_np = lap_features[LAP_FEATURES].values.copy()
-        
+
         if len(features_np) > 1:
             features_np[0] = features_np[1]
-        
+
         padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
         new_seqs = []
         for i in range(len(features_np)):

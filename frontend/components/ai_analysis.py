@@ -41,6 +41,7 @@ def _build_cv_scores_chart(cv_scores: dict, best_contamination: float) -> go.Fig
     )
     return fig_cv
 
+
 def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
     """Build the full tyre cliff Plotly figure for one stint."""
     n_laps = stint["n_laps"]
@@ -133,6 +134,7 @@ def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
         showlegend=True,
     )
     return fig
+
 
 def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: Optional[dict]) -> None:
     """Render the full Isolation Forest card including map, stats, and CV scores."""
@@ -236,6 +238,7 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
         fig_cv = _build_cv_scores_chart(meta["cv_scores"], meta["best_contamination"])
         st.plotly_chart(fig_cv, width='stretch')
 
+
 def _render_lstm_column(tyre_data: Optional[dict]) -> None:
     """Render the LSTM Tyre Cliff chart card including stint selector and stats."""
     st.markdown("**LSTM TYRE CLIFF PREDICTOR**")
@@ -277,7 +280,7 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
     if len(stints) == 0:
         st.warning("Prediction file exists but contains no stint data.")
         return
-        
+
     stint_options = [
         f"Stint {s['stint_index'] + 1} ({s['n_laps']} laps)"
         for s in stints
@@ -303,7 +306,7 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
     with c2:
         lr = stint.get("laps_remaining")
         st.metric("Laps Remaining", str(lr) if lr is not None else "—")
-        
+
     st.write("") # small spacing
     c3, c4 = st.columns(2)
     with c3:
@@ -331,6 +334,7 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
 - **Generated:** {tyre_data.get('timestamp', '—')}
         """)
 
+
 def render_ai_analysis(
     df_mistakes: Optional[pd.DataFrame],
     meta: Optional[dict],
@@ -346,4 +350,3 @@ def render_ai_analysis(
 
     with col_right:
         _render_lstm_column(tyre_data)
-

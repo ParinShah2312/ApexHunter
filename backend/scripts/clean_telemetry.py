@@ -1,6 +1,15 @@
-"""Batch telemetry cleaning pipeline for ApexHunter.
-Reads raw parquet files, applies domain-specific cleaning (null handling,
-outlier clipping, type downcasting), and writes cleaned parquet output."""
+"""
+================================================================================
+  ApexHunter - Telemetry Cleaning Pipeline
+  Script: clean_telemetry.py
+--------------------------------------------------------------------------------
+  Purpose : Reads raw parquet files, applies domain-specific cleaning (null
+            handling, outlier clipping, type downcasting), and writes cleaned
+            parquet output.
+
+  Usage   : python backend/scripts/clean_telemetry.py [--input-dir] [--file]
+================================================================================
+"""
 
 import argparse
 import gc
@@ -9,19 +18,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from utils import setup_logger, DATA_LAKE_DIR
+from utils import DATA_LAKE_DIR, setup_logger
 
-# Configure logging
+# ── Configuration ─────────────────────────────────────────────────────────────
+
 logger = setup_logger(__name__)
 
-# Input / Output Directories
 RAW_DATA_DIR = DATA_LAKE_DIR / "season_data"
 CLEAN_DATA_DIR = DATA_LAKE_DIR / "clean_data"
 
+
 def get_directory_size(directory: Path) -> str:
     """Calculates the total size of files in a directory in MB."""
-    total_size = sum(f.stat().st_size for f in directory.rglob('*') if f.is_file())
+    total_size = sum(f.stat().st_size for f in directory.rglob("*") if f.is_file())
     return f"{total_size / (1024 * 1024):.2f} MB"
+
 
 def _synthesize_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Step 1: Synthesize missing essential columns."""
@@ -38,6 +49,7 @@ def _synthesize_missing_columns(df: pd.DataFrame) -> pd.DataFrame:
                 df[c] = 0
     return df
 
+
 def _drop_all_null_core_rows(df: pd.DataFrame) -> pd.DataFrame:
     """Step 2: Drop rows missing all core telemetry."""
     core_telemetry = ['Speed', 'RPM', 'X', 'Y']
@@ -46,11 +58,13 @@ def _drop_all_null_core_rows(df: pd.DataFrame) -> pd.DataFrame:
         df.dropna(subset=cols_to_check, how='all', inplace=True)
     return df
 
+
 def _forward_fill_numeric(df: pd.DataFrame) -> pd.DataFrame:
     """Step 3: Forward fill small gaps in numeric columns."""
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     df[numeric_cols] = df[numeric_cols].ffill()
     return df
+
 
 def _clip_telemetry_outliers(df: pd.DataFrame) -> pd.DataFrame:
     """Step 4: Domain specific outlier clipping."""
@@ -63,6 +77,7 @@ def _clip_telemetry_outliers(df: pd.DataFrame) -> pd.DataFrame:
     if 'Brake' in df.columns:
         df['Brake'] = df['Brake'].clip(lower=0, upper=100)
     return df
+
 
 def _downcast_to_float32(df: pd.DataFrame) -> pd.DataFrame:
     """Step 5: Optimize Memory (Downcast types)."""
@@ -79,6 +94,7 @@ def _downcast_to_float32(df: pd.DataFrame) -> pd.DataFrame:
     if 'Y' in df.columns:
         df['Y'] = df['Y'].astype('float32')
     return df
+
 
 def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
     """Loads, cleans, and saves a Single telemetry file.
@@ -99,7 +115,7 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
 
         # 2. Drop Rows Missing Critical Core Telemetry
         df = _drop_all_null_core_rows(df)
-            
+
         dropped_rows = initial_rows - len(df)
 
         # 3. Forward Fill Small Gaps (Interpolate missing sensor packets within laps)
@@ -112,16 +128,17 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
         df = _downcast_to_float32(df)
 
         # Save Cleaned Data to Parquet (Better for big data than CSV)
-        df.to_parquet(output_file, compression='snappy')
-        
+        df.to_parquet(output_file, compression="snappy")
+
         logger.info(f"Cleaned {input_file.name}: Dropped {dropped_rows} rows. Saved to clean_data/.")
-        
+
         # Cleanup memory immediately
         del df
         gc.collect()
 
     except Exception as e:
         logger.error(f"Error processing {input_file.name}: {e}")
+
 
 def main() -> None:
     """Parse CLI arguments and run telemetry cleaning batch pipeline."""
@@ -148,23 +165,24 @@ def main() -> None:
 
     logger.info("Starting Batch Telemetry Data Cleaning Pipeline...")
     logger.info(f"Raw Data Lake Size: {get_directory_size(input_path)}")
-    
+
     # Process all parquets in the raw data lake
     raw_files = list(input_path.glob("*.parquet"))
-    
+
     for i, file_path in enumerate(raw_files, 1):
         out_file = output_path / file_path.name
-        
+
         # Skip if already cleaned (saves time on subsequent runs)
         if out_file.exists():
             logger.info(f"[{i}/{len(raw_files)}] Skipping {file_path.name} (already cleaned)")
             continue
-            
+
         logger.info(f"[{i}/{len(raw_files)}] Processing {file_path.name}...")
         clean_telemetry_file(file_path, out_file)
 
     logger.info("--- Data Cleaning Complete ---")
     logger.info(f"Clean Data Lake Size: {get_directory_size(output_path)}")
+
 
 if __name__ == "__main__":
     main()

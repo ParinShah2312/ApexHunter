@@ -1,4 +1,13 @@
-"""Orchestrator: Runs YOLOv11-Seg on F1 video, outputs HUD video + metrics CSV."""
+"""
+================================================================================
+  ApexHunter - YOLOv11-Seg Inference Pipeline
+  Script: run_inference.py
+--------------------------------------------------------------------------------
+  Purpose : Runs YOLOv11-Seg on F1 video, outputs HUD video + metrics CSV.
+
+  Usage   : python backend/scripts/run_inference.py --input <video_path>
+================================================================================
+"""
 
 import argparse
 import sys
@@ -62,9 +71,14 @@ def process_video(input_video_path: Path, force: bool = False) -> None:
     logger.info(f"Done — Video: {vid_out.resolve()}, CSV: {csv_out.resolve()}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Parse CLI arguments and run YOLO inference."""
     p = argparse.ArgumentParser(description="Run YOLO inference on F1 pole lap video.")
-    p.add_argument('--input', type=str, default=str(DEFAULT_INPUT_VIDEO), help="Input video path.")
-    p.add_argument('--force', action='store_true', default=False, help="Re-run if output exists.")
+    p.add_argument("--input", type=str, default=str(DEFAULT_INPUT_VIDEO), help="Input video path.")
+    p.add_argument("--force", action="store_true", default=False, help="Re-run if output exists.")
     a = p.parse_args()
     process_video(Path(a.input), force=a.force)
+
+
+if __name__ == "__main__":
+    main()

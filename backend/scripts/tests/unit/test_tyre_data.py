@@ -55,21 +55,81 @@ def _build_synthetic_df() -> pd.DataFrame:
     })
 
 
-class TestDetectStints(unittest.TestCase):
-    def test_skip(self):
-        self.skipTest("Obsolete function")
+class TestConstants(unittest.TestCase):
+    """Tests for module-level constants and LAP_FEATURES contract."""
 
-class TestSplitStintIntoLaps(unittest.TestCase):
-    def test_skip(self):
-        self.skipTest("Obsolete function")
+    def test_sequence_length_positive(self) -> None:
+        self.assertGreater(SEQUENCE_LENGTH, 0)
 
-class TestAggregateLapFeatures(unittest.TestCase):
-    def test_skip(self):
-        self.skipTest("Obsolete function")
+    def test_lap_features_is_non_empty_list(self) -> None:
+        self.assertIsInstance(LAP_FEATURES, list)
+        self.assertGreater(len(LAP_FEATURES), 0)
 
-class TestBuildStintSequences(unittest.TestCase):
-    def test_skip(self):
-        self.skipTest("Obsolete function")
+    def test_lap_features_are_strings(self) -> None:
+        for feat in LAP_FEATURES:
+            self.assertIsInstance(feat, str)
+
+    def test_lap_features_no_duplicates(self) -> None:
+        self.assertEqual(len(LAP_FEATURES), len(set(LAP_FEATURES)))
+
+
+class TestExtractStintsEdgeCases(unittest.TestCase):
+    """Tests for extract_stints with edge-case inputs (no FastF1 dependency)."""
+
+    def setUp(self) -> None:
+        self.logger = _silent_logger()
+
+    def test_empty_driver_laps_returns_empty(self) -> None:
+        """extract_stints should return [] when driver_laps is empty."""
+        driver_laps = pd.DataFrame(columns=["LapNumber", "Stint", "LapStartTime", "Time", "Compound", "TyreLife", "LapTime"])
+        telemetry = pd.DataFrame(columns=["SessionTime", "Speed", "Throttle", "Brake", "RPM"])
+        result = extract_stints(driver_laps, telemetry, self.logger)
+        self.assertEqual(result, [])
+
+    def test_insufficient_laps_returns_empty(self) -> None:
+        """extract_stints should return [] when stint has fewer laps than MIN_STINT_LAPS."""
+        from tyre_data import MIN_STINT_LAPS
+        # Create 1 lap (below threshold)
+        driver_laps = pd.DataFrame({
+            "LapNumber": [1],
+            "Stint": [1],
+            "LapStartTime": [pd.Timedelta(seconds=0)],
+            "Time": [pd.Timedelta(seconds=90)],
+            "Compound": ["SOFT"],
+            "TyreLife": [1.0],
+            "LapTime": [pd.Timedelta(seconds=90)],
+        })
+        telemetry = pd.DataFrame({
+            "SessionTime": pd.to_timedelta(np.linspace(0, 90, 100), unit="s"),
+            "Speed": np.full(100, 200.0),
+            "Throttle": np.full(100, 70.0),
+            "Brake": np.full(100, 5.0),
+            "RPM": np.full(100, 9000.0),
+        })
+        result = extract_stints(driver_laps, telemetry, self.logger)
+        self.assertEqual(result, [])
+
+    def test_telemetry_too_sparse_skips_lap(self) -> None:
+        """Laps with < 5 telemetry rows should be skipped."""
+        driver_laps = pd.DataFrame({
+            "LapNumber": [1, 2, 3, 4],
+            "Stint": [1, 1, 1, 1],
+            "LapStartTime": [pd.Timedelta(seconds=i * 90) for i in range(4)],
+            "Time": [pd.Timedelta(seconds=(i + 1) * 90) for i in range(4)],
+            "Compound": ["MEDIUM"] * 4,
+            "TyreLife": [1.0, 2.0, 3.0, 4.0],
+            "LapTime": [pd.Timedelta(seconds=90)] * 4,
+        })
+        # Only 2 telemetry rows total — every lap will have < 5 rows
+        telemetry = pd.DataFrame({
+            "SessionTime": pd.to_timedelta([10, 100], unit="s"),
+            "Speed": [200.0, 210.0],
+            "Throttle": [70.0, 75.0],
+            "Brake": [5.0, 3.0],
+            "RPM": [9000.0, 9500.0],
+        })
+        result = extract_stints(driver_laps, telemetry, self.logger)
+        self.assertEqual(result, [])
 
 
 class TestBuildTrainingDataset(unittest.TestCase):

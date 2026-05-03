@@ -17,6 +17,8 @@ from racing_line_grid import GridNode
 
 
 @dataclass
+
+
 class SearchResult:
     algorithm: str
     path_keys: List[Tuple[int, int]]
@@ -37,6 +39,7 @@ def _reconstruct_path(came_from: dict, end: Tuple[int, int]) -> List[Tuple[int, 
     path.reverse()
     return path
 
+
 def _astar_heuristic_full(
     current_node: GridNode, end_node: GridNode, min_weight: float
 ) -> float:
@@ -47,6 +50,7 @@ def _astar_heuristic_full(
     )
     return grid_dist * min_weight
 
+
 def astar(
     grid: Dict[Tuple[int, int], GridNode],
     adjacency: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], float]]],
@@ -56,27 +60,27 @@ def astar(
 ) -> SearchResult:
     """A* search using Euclidean distance heuristic scaled by the minimum
     edge cost. Guaranteed optimal when the heuristic is admissible.
-    
+
     Args:
         grid: The node dictionary.
         adjacency: The adjacency dictionary.
         start: The start node coordinate.
         end: The end node coordinate.
         logger: The logger instance.
-        
+
     Returns:
         A SearchResult containing the path and metadata.
     """
     t_start = time.time()
-    
+
     if start not in grid or end not in grid:
         logger.warning("A*: start or end node not in grid.")
         return SearchResult("astar", [], [], 0.0, 0, time.time() - t_start, False)
-        
+
     end_node = grid[end]
     min_weight = min(n.weight for n in grid.values())
 
-    
+
     open_set = []
     initial_h = _astar_heuristic_full(grid[start], end_node, min_weight)
     heapq.heappush(open_set, (0.0 + initial_h, start))
@@ -89,17 +93,17 @@ def astar(
         f, current = heapq.heappop(open_set)
         if current in closed_set:
             continue
-            
+
         closed_set.add(current)
         nodes_expanded += 1
 
         if current == end:
             path_keys = _reconstruct_path(came_from, end)
-            
+
             path_coords = [(grid[k].center_x, grid[k].center_y) for k in path_keys]
             total_cost = g_scores[end]
             compute_time = time.time() - t_start
-            
+
             logger.info(
                 f"A*: path found, {nodes_expanded} nodes expanded, "
                 f"cost={total_cost:.3f}, time={compute_time:.3f}s"
@@ -112,7 +116,7 @@ def astar(
         for neighbor, edge_cost in adjacency.get(current, []):
             if neighbor in closed_set:
                 continue
-                
+
             tentative_g = g_scores[current] + edge_cost
             if neighbor not in g_scores or tentative_g < g_scores[neighbor]:
                 g_scores[neighbor] = tentative_g
@@ -134,19 +138,19 @@ def dijkstra(
 ) -> SearchResult:
     """Dijkstra's algorithm — A* with h(n) = 0. Explores more nodes than A*
     but provides ground-truth verification of the globally optimal path cost.
-    
+
     Args:
         grid: The node dictionary.
         adjacency: The adjacency dictionary.
         start: The start node coordinate.
         end: The end node coordinate.
         logger: The logger instance.
-        
+
     Returns:
         A SearchResult containing the path and metadata.
     """
     t_start = time.time()
-    
+
     if start not in grid or end not in grid:
         logger.warning("Dijkstra: start or end node not in grid.")
         return SearchResult("dijkstra", [], [], 0.0, 0, time.time() - t_start, False)
@@ -162,17 +166,17 @@ def dijkstra(
         g, current = heapq.heappop(open_set)
         if current in closed_set:
             continue
-            
+
         closed_set.add(current)
         nodes_expanded += 1
 
         if current == end:
             path_keys = _reconstruct_path(came_from, end)
-            
+
             path_coords = [(grid[k].center_x, grid[k].center_y) for k in path_keys]
             total_cost = g_scores[end]
             compute_time = time.time() - t_start
-            
+
             logger.info(
                 f"Dijkstra: path found, {nodes_expanded} nodes expanded, "
                 f"cost={total_cost:.3f}, time={compute_time:.3f}s"
@@ -185,7 +189,7 @@ def dijkstra(
         for neighbor, edge_cost in adjacency.get(current, []):
             if neighbor in closed_set:
                 continue
-                
+
             tentative_g = g_scores[current] + edge_cost
             if neighbor not in g_scores or tentative_g < g_scores[neighbor]:
                 g_scores[neighbor] = tentative_g
@@ -207,19 +211,19 @@ def bfs(
     """Breadth-first search — ignores edge weights entirely. Finds the path
     with the fewest hops. Used as a geometric baseline comparison against cost-weighted
     paths from A* and Dijkstra.
-    
+
     Args:
         grid: The node dictionary.
         adjacency: The adjacency dictionary.
         start: The start node coordinate.
         end: The end node coordinate.
         logger: The logger instance.
-        
+
     Returns:
         A SearchResult containing the path and metadata.
     """
     t_start = time.time()
-    
+
     if start not in grid or end not in grid:
         logger.warning("BFS: start or end node not in grid.")
         return SearchResult("bfs", [], [], 0.0, 0, time.time() - t_start, False)
@@ -235,7 +239,7 @@ def bfs(
         if current == end:
             path_coords = [(grid[k].center_x, grid[k].center_y) for k in path]
             compute_time = time.time() - t_start
-            
+
             logger.info(
                 f"BFS: path found, {nodes_expanded} nodes expanded, "
                 f"hops={len(path)}, time={compute_time:.3f}s"
@@ -261,14 +265,14 @@ def compute_path_cost_weighted(
     adjacency: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], float]]]
 ) -> float:
     """Compute the true weighted cost of any path through the grid.
-    
+
     Used to give BFS a comparable cost even though BFS ignores weights during search.
-    
+
     Args:
         path_keys: The list of grid keys forming the path.
         grid: The node dictionary.
         adjacency: The adjacency dictionary.
-        
+
     Returns:
         The total path cost.
     """
@@ -276,18 +280,18 @@ def compute_path_cost_weighted(
     for i in range(len(path_keys) - 1):
         u = path_keys[i]
         v = path_keys[i + 1]
-        
+
         edge_cost = None
         for neighbor, cost in adjacency.get(u, []):
             if neighbor == v:
                 edge_cost = cost
                 break
-                
+
         if edge_cost is not None:
             total += edge_cost
         else:
             logging.getLogger(__name__).warning(f"Edge {u} -> {v} not found in adjacency.")
-            
+
     return total
 
 
@@ -300,13 +304,13 @@ def compute_deviation_per_corner(
     """Compute per-corner deviation between the A* optimal path and the
     driver's actual GPS path. Divides both paths into N equal arc-length segments
     and computes mean nearest-point distance for each segment.
-    
+
     Args:
         astar_result: The SearchResult from A*.
         driver_path_coords: The actual path coordinates of the driver.
         scale: The coordinate scale factor.
         n_corners: The number of corners to divide into.
-        
+
     Returns:
         A list of dictionaries containing corner name and deviation in meters.
     """
@@ -329,12 +333,12 @@ def compute_deviation_per_corner(
 
     deviations = []
     segment_size = max(1, len(astar_arr) // n_corners)
-    
+
     for s in range(n_corners):
         segment_start = s * segment_size
         segment_end = min((s + 1) * segment_size, len(astar_arr))
         segment_pts = astar_arr[segment_start:segment_end]
-        
+
         if len(segment_pts) == 0:
             deviations.append({"corner": f"T{s+1}", "deviation_m": None})
             continue
@@ -343,12 +347,12 @@ def compute_deviation_per_corner(
         for pt in segment_pts:
             dists = np.linalg.norm(driver_arr - pt, axis=1)
             min_dists.append(dists.min())
-            
+
         mean_deviation_units = np.mean(min_dists)
         deviation_m = mean_deviation_units * scale
-        
+
         deviations.append({"corner": f"T{s+1}", "deviation_m": round(float(deviation_m), 3)})
-        
+
     return deviations
 
 
@@ -356,27 +360,27 @@ def run_full_lap(search_func, nodes: list, grid: dict, adjacency: dict, logger) 
     """Run search function across multiple nodes to form a complete lap."""
     if len(nodes) == 2:
         return search_func(grid, adjacency, nodes[0], nodes[1], logger)
-        
+
     results = []
     for i in range(len(nodes) - 1):
         res = search_func(grid, adjacency, nodes[i], nodes[i+1], logger)
         if not res.found:
             return res # Failed segment
         results.append(res)
-        
+
     final_coords = results[0].path_coords
     final_keys = results[0].path_keys
     total_cost = results[0].total_cost
     total_expanded = results[0].nodes_expanded
     total_time = results[0].compute_time_s
-    
+
     for r in results[1:]:
         final_coords += r.path_coords[1:]
         final_keys += r.path_keys[1:]
         total_cost += r.total_cost
         total_expanded += r.nodes_expanded
         total_time += r.compute_time_s
-        
+
     return SearchResult(
         algorithm=results[0].algorithm,
         path_coords=final_coords,

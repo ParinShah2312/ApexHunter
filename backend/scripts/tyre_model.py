@@ -90,6 +90,7 @@ def _build_data_loader(
     dataset = TensorDataset(X_t, y_t)
     return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
+
 def _compute_val_mse(
     model: nn.Module, X_val_t: torch.Tensor, y_val_t: torch.Tensor, criterion: nn.Module
 ) -> float:
@@ -99,6 +100,7 @@ def _compute_val_mse(
         val_preds = model(X_val_t)
         val_mse = float(criterion(val_preds, y_val_t).item())
     return val_mse
+
 
 def _run_training_loop(
     model: nn.Module,
@@ -163,6 +165,7 @@ def _run_training_loop(
         f"| val={val_mse:.6f}  best={best_val_mse:.6f}@ep{best_epoch}"
     )
     return best_val_mse, best_epoch
+
 
 def train_one_config(
     X_train: np.ndarray,
@@ -443,24 +446,24 @@ def predict_single_stint(
     lap_features = pd.DataFrame(stint_data["lap_features"])
     actual_speeds = lap_features["mean_speed"].tolist()
     actual_lap_times = lap_features["lap_time_seconds"].tolist()
-    
+
     features_np = lap_features[LAP_FEATURES].values.copy()
-    
+
     if len(features_np) > 1:
         features_np[0] = features_np[1]
-    
+
     padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
-    
+
     new_seqs = []
     for i in range(len(features_np)):
         new_seqs.append(padded_features[i : i + seq_len])
-        
+
     sequences = np.array(new_seqs, dtype=np.float32)
     seq_2d = sequences.reshape(-1, INPUT_SIZE)
     seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
-    
+
     mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
-    
+
     mean_preds_speed = (mean_preds * y_std + y_mean).tolist()
     lower_speed = (lower * y_std + y_mean).tolist()
     upper_speed = (upper * y_std + y_mean).tolist()
@@ -477,7 +480,7 @@ def predict_single_stint(
     confidence_lower = [speed_to_time(s) for s in upper_speed]
     confidence_upper = [speed_to_time(s) for s in lower_speed]
     actual_laps_clean = [t if not pd.isna(t) else None for t in actual_lap_times]
-    
+
     best_lap_time = min(predicted_laps)
     best_lap_idx = predicted_laps.index(best_lap_time)
     cliff_lap = None

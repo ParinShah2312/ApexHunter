@@ -12,6 +12,7 @@ import pandas as pd
 
 from mistakes_features import FEATURE_COLUMNS
 from mistakes_model import N_ESTIMATORS
+from utils import IST
 
 # ── Required columns for session parquet files ────────────────────────────────
 REQUIRED_COLUMNS: List[str] = [
@@ -133,7 +134,7 @@ def build_meta(
         "mistake_rate_pct": mistake_rate_pct,
         "n_estimators": N_ESTIMATORS,
         "feature_columns": FEATURE_COLUMNS,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(IST).isoformat(),
     }
 
 

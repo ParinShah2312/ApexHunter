@@ -13,6 +13,7 @@ import pandas as pd
 
 from racing_line_grid import GridNode
 from racing_line_search import SearchResult
+from utils import IST
 
 REQUIRED_COLUMNS: List[str] = ["Driver", "X", "Y", "Speed", "Brake", "SessionTime"]
 
@@ -24,15 +25,15 @@ def load_and_validate(
 ) -> pd.DataFrame:
     """Load the parquet. Validate REQUIRED_COLUMNS are present.
     Filter to the specified driver.
-    
+
     Args:
         session_path: Path to the clean parquet file.
         driver: The driver code string.
         logger: The logger instance.
-        
+
     Returns:
         The filtered DataFrame.
-        
+
     Raises:
         ValueError: If a required column is missing or driver not found.
     """
@@ -77,7 +78,7 @@ def build_output(
     n_corners: int
 ) -> dict:
     """Construct the complete output JSON dictionary.
-    
+
     Args:
         session_path: The session file path.
         driver: The driver code string.
@@ -91,7 +92,7 @@ def build_output(
         driver_path_coords: Subsampled telemetry path for the driver.
         deviation_per_corner: Computed per-corner deviation.
         n_corners: Number of corners for deviation.
-        
+
     Returns:
         The complete dictionary matching the expected output schema.
     """
@@ -102,7 +103,7 @@ def build_output(
         "circuit_length_km": circuit_length_km,
         "coordinate_scale": scale,
         "n_corners": n_corners,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(IST).isoformat(),
         "driver_path": [[x, y] for x, y in driver_path_coords],
         "algorithms": {
             "astar": {
@@ -153,13 +154,13 @@ def compute_time_saved(
     """Estimate seconds saved by following the optimal path vs the driver's
     actual path. Computed by comparing mean node speeds along each path, then
     converting path length difference to time using mean speed.
-    
+
     Args:
         result: The search result (A*, Dijkstra, BFS).
         driver_path_coords: The actual path coordinates of the driver.
         grid: The node dictionary.
         scale: The coordinate scale factor.
-        
+
     Returns:
         The estimated time saved in seconds, or None if invalid.
     """
@@ -203,7 +204,7 @@ def compute_time_saved(
 
 def save_output(data: dict, output_path: Path, logger: logging.Logger) -> None:
     """Write data to output_path as JSON.
-    
+
     Args:
         data: The dictionary to save.
         output_path: The file path to save to.
@@ -225,13 +226,13 @@ def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logg
         except ValueError:
             pass # Keep as string if it's a name
         session_name = df["Session"].iloc[0]
-        
+
         session = fastf1.get_session(year, round_val, session_name)
         session.load(telemetry=False, weather=False, messages=False)
         lap = session.laps.pick_driver(driver).pick_fastest()
         start_t = lap["LapStartTime"]
         end_t = lap["Time"]
-        
+
         df_lap = df[(df["SessionTime"] >= start_t) & (df["SessionTime"] <= end_t)]
         if df_lap.empty:
             logger.warning("Fastest lap empty in telemetry, falling back to full session.")

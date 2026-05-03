@@ -1,12 +1,13 @@
+"""Unit tests for racing_line_io — output building, saving, and time computation."""
+
 import json
 import logging
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import pandas as pd
-
-import sys
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -25,10 +26,10 @@ class TestRacingLineIO(unittest.TestCase):
     def setUp(self):
         self.logger = logging.getLogger("test")
         self.logger.setLevel(logging.CRITICAL)
-        
+
         self.temp_dir = tempfile.TemporaryDirectory()
         self.temp_path = Path(self.temp_dir.name)
-        
+
         self.df = pd.DataFrame({
             "Driver": ["44", "44", "1", "1"],
             "X": [0.0, 10.0, 0.0, 10.0],
@@ -39,7 +40,7 @@ class TestRacingLineIO(unittest.TestCase):
         })
         self.valid_parquet = self.temp_path / "valid.parquet"
         self.df.to_parquet(self.valid_parquet)
-        
+
         self.dummy_sr = SearchResult(
             algorithm="astar",
             path_keys=[(0, 0), (1, 1)],
@@ -88,7 +89,7 @@ class TestRacingLineIO(unittest.TestCase):
             deviation_per_corner=[],
             n_corners=16
         )
-        
+
         required_keys = [
             "session_file", "driver", "grid_resolution", "circuit_length_km",
             "coordinate_scale", "n_corners", "timestamp", "driver_path",
@@ -96,11 +97,11 @@ class TestRacingLineIO(unittest.TestCase):
         ]
         for key in required_keys:
             self.assertIn(key, data)
-            
+
         self.assertIn("astar", data["algorithms"])
         self.assertIn("dijkstra", data["algorithms"])
         self.assertIn("bfs", data["algorithms"])
-        
+
         algo_keys = ["path", "cost", "nodes_expanded", "compute_time_s", "time_saved_s", "found"]
         for algo in ["astar", "dijkstra", "bfs"]:
             for k in algo_keys:

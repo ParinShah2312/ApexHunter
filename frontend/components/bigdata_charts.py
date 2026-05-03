@@ -23,6 +23,8 @@ _YELLOW = "#eab308"
 # ────────────────────────────────────────────────────────────
 #  1. Pipeline DAG (network graph)
 # ────────────────────────────────────────────────────────────
+
+
 def build_pipeline_dag() -> go.Figure:
     nodes = [
         "FastF1 API", "Local Parquets", "HDFS Raw",
@@ -63,6 +65,8 @@ def build_pipeline_dag() -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  2. HDFS file-size treemap
 # ────────────────────────────────────────────────────────────
+
+
 def build_hdfs_treemap(hdfs_stats: dict) -> go.Figure:
     dirs = hdfs_stats.get("directories", {})
     labels, parents, values, colors = [], [], [], []
@@ -85,6 +89,8 @@ def build_hdfs_treemap(hdfs_stats: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  3. HDFS storage bar chart (per-directory)
 # ────────────────────────────────────────────────────────────
+
+
 def build_hdfs_bar(hdfs_stats: dict) -> go.Figure:
     dirs = hdfs_stats.get("directories", {})
     names = list(dirs.keys())
@@ -108,6 +114,8 @@ def build_hdfs_bar(hdfs_stats: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  4. Spark ETL gauge
 # ────────────────────────────────────────────────────────────
+
+
 def build_spark_gauge(spark_stats: dict) -> go.Figure:
     rows_in = spark_stats.get("rows_input", 0)
     rows_out = spark_stats.get("rows_output", 0)
@@ -131,6 +139,8 @@ def build_spark_gauge(spark_stats: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  5. Spark processing waterfall
 # ────────────────────────────────────────────────────────────
+
+
 def build_spark_waterfall(spark_stats: dict) -> go.Figure:
     rows_in = spark_stats.get("rows_input", 0)
     dropped = spark_stats.get("rows_dropped", 0)
@@ -155,6 +165,8 @@ def build_spark_waterfall(spark_stats: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  6. Session heatmap (Year × Round)
 # ────────────────────────────────────────────────────────────
+
+
 def build_session_file_size_bar(hdfs_stats: dict) -> go.Figure:
     """Bar chart showing file sizes per round, grouped by year."""
     files = hdfs_stats.get("directories", {}).get("season_data", {}).get("files", [])
@@ -185,6 +197,8 @@ def build_session_file_size_bar(hdfs_stats: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  7. Telemetry speed distribution (violin)
 # ────────────────────────────────────────────────────────────
+
+
 def build_speed_distribution(sample_df: pd.DataFrame) -> go.Figure:
     """Overlaid speed histograms for top 5 drivers — shows driving style differences."""
     if "Speed" not in sample_df.columns or "Driver" not in sample_df.columns:
@@ -208,6 +222,8 @@ def build_speed_distribution(sample_df: pd.DataFrame) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  8. Telemetry correlation heatmap
 # ────────────────────────────────────────────────────────────
+
+
 def build_correlation_heatmap(sample_df: pd.DataFrame) -> go.Figure:
     num_cols = [c for c in ["Speed","RPM","Throttle","Brake","X","Y","Z","nGear"] if c in sample_df.columns]
     if len(num_cols) < 2:
@@ -228,6 +244,8 @@ def build_correlation_heatmap(sample_df: pd.DataFrame) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  9. Speed vs RPM scatter
 # ────────────────────────────────────────────────────────────
+
+
 def build_speed_rpm_scatter(sample_df: pd.DataFrame) -> go.Figure:
     """Speed vs RPM scatter with gear-colored markers and clear grouping."""
     if not {"Speed","RPM","nGear"}.issubset(sample_df.columns):
@@ -251,6 +269,8 @@ def build_speed_rpm_scatter(sample_df: pd.DataFrame) -> go.Figure:
         legend=dict(bgcolor="rgba(13,21,32,0.9)", font=dict(size=11, color="#c8d0dc"),
             bordercolor="#334155", borderwidth=1, x=1.02, y=1, xanchor="left"))
     return fig
+
+
 def build_speed_over_distance(sample_df: pd.DataFrame) -> go.Figure:
     """Speed trace over session time for the selected driver — like F1 TV overlay."""
     if not {"Speed"}.issubset(sample_df.columns):
@@ -278,6 +298,8 @@ def build_speed_over_distance(sample_df: pd.DataFrame) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  12. LSTM tyre degradation line chart (all stints overlay)
 # ────────────────────────────────────────────────────────────
+
+
 def build_tyre_degradation_line(tyre_data: dict) -> go.Figure:
     stints = tyre_data.get("stints", [])
     if not stints:
@@ -307,6 +329,8 @@ def build_tyre_degradation_line(tyre_data: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  13. LSTM confidence band area chart
 # ────────────────────────────────────────────────────────────
+
+
 def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
     stints = tyre_data.get("stints", [])
     if not stints:
@@ -334,6 +358,8 @@ def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  14. Racing line algorithm comparison (multi-bar)
 # ────────────────────────────────────────────────────────────
+
+
 def build_algo_comparison_bar(racing_data: dict) -> go.Figure:
     algos = racing_data.get("algorithms", {})
     if not algos:
@@ -362,6 +388,8 @@ def build_algo_comparison_bar(racing_data: dict) -> go.Figure:
 # ────────────────────────────────────────────────────────────
 #  15. Technology stack radar chart
 # ────────────────────────────────────────────────────────────
+
+
 def build_tech_radar() -> go.Figure:
     cats = ["HDFS Storage", "Spark ETL", "MongoDB", "LSTM/AI", "Pathfinding", "Computer Vision"]
     vals = [92, 85, 93, 78, 88, 70]

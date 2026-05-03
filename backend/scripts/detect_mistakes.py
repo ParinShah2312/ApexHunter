@@ -1,4 +1,14 @@
-"""Orchestrator for Isolation Forest anomaly detection on F1 telemetry data."""
+"""
+================================================================================
+  ApexHunter - Isolation Forest Anomaly Detection
+  Script: detect_mistakes.py
+--------------------------------------------------------------------------------
+  Purpose : Orchestrator for Isolation Forest anomaly detection on F1
+            telemetry data.
+
+  Usage   : python backend/scripts/detect_mistakes.py --session <path> --driver <code>
+================================================================================
+"""
 
 import argparse
 import gc
@@ -7,10 +17,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils import setup_logger, DATA_LAKE_DIR
 from mistakes_features import FEATURE_COLUMNS, engineer_features
-from mistakes_model import run_grid_search, train_final_model, run_inference, CONTAMINATION_VALUES
-from mistakes_io import load_and_validate, select_reference_driver, build_meta, save_outputs
+from mistakes_io import build_meta, load_and_validate, save_outputs, select_reference_driver
+from mistakes_model import CONTAMINATION_VALUES, run_grid_search, run_inference, train_final_model
+from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)
 

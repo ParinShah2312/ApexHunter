@@ -12,17 +12,18 @@
 ================================================================================
 """
 
-import sys
 import concurrent.futures
+import sys
 from typing import Dict, Union
-from utils import setup_logger, DATA_LAKE_DIR, CONFIG
+
+from utils import CONFIG, DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)
 
 try:
     from staticmap import StaticMap
 except ImportError:
-    print("[ERROR] staticmap is not installed. Run: pip install staticmap")
+    logger.error("staticmap is not installed. Run: pip install staticmap")
     sys.exit(1)
 
 DATA_LAKE_ROOT = DATA_LAKE_DIR / "raw_images" / "satellite_maps"
@@ -58,7 +59,7 @@ def download_single_circuit(circuit: Dict[str, Union[str, float]]) -> int:
     try:
         m = StaticMap(IMAGE_WIDTH, IMAGE_HEIGHT, url_template=ESRI_SATELLITE_URL)
         image = m.render(zoom=ZOOM_LEVEL, center=[lon, lat])
-        
+
         # Using str(final_img_path) because some libraries don't fully support Path objects
         image.save(str(final_img_path))
         logger.info(f"✓ Saved to {final_img_path.name}")
@@ -66,6 +67,7 @@ def download_single_circuit(circuit: Dict[str, Union[str, float]]) -> int:
     except Exception as e:
         logger.error(f"Failed to download {race_name}: {e}")
         return 0
+
 
 def download_satellite_images() -> None:
     """Downloads satellite imagery for all 2024 F1 circuits using ThreadPoolExecutor."""
@@ -85,7 +87,7 @@ def download_satellite_images() -> None:
     # Max 10 threads to avoid hammering the free API server too hard
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(download_single_circuit, c): c for c in CIRCUITS_2024}
-        
+
         for future in concurrent.futures.as_completed(futures):
             downloaded = future.result()
             if downloaded == 1:

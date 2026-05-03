@@ -15,6 +15,8 @@ import streamlit as st
 
 
 @st.cache_data(show_spinner=False)
+
+
 def get_event_schedule(year: int) -> Dict[int, str]:
     """Fetches the F1 event schedule for a given year and returns a round→name map."""
     try:
@@ -25,6 +27,8 @@ def get_event_schedule(year: int) -> Dict[int, str]:
 
 
 @st.cache_data(show_spinner="Loading telemetry...")
+
+
 def load_session_data(filepath: str) -> pd.DataFrame:
     """Loads a parquet file and ensures all expected columns exist.
 
@@ -53,6 +57,8 @@ def load_session_data(filepath: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+
+
 def load_mistake_data(filepath: str) -> Optional[pd.DataFrame]:
     """Reads the Isolation Forest annotated parquet.
 
@@ -76,6 +82,8 @@ def load_mistake_meta(filepath: str) -> Optional[dict]:
 
 
 @st.cache_data(show_spinner=False)
+
+
 def load_cv_metrics(filepath: str) -> Optional[pd.DataFrame]:
     """Reads the CV metrics CSV and cleans the columns.
 
@@ -150,4 +158,3 @@ def load_tyre_prediction(filepath: str) -> Optional[dict]:
             return json.load(f)
     except Exception:
         return None
-

@@ -1,20 +1,28 @@
-"""Prediction orchestrator for the ApexHunter LSTM tyre cliff predictor.
-Loads a trained model and predicts cliff laps for a session."""
+"""
+================================================================================
+  ApexHunter - LSTM Tyre Cliff Predictor
+  Script: predict_cliff.py
+--------------------------------------------------------------------------------
+  Purpose : Loads a trained LSTM model and predicts tyre cliff laps for a
+            session.
+
+  Usage   : python backend/scripts/predict_cliff.py --session <path> --driver <code>
+================================================================================
+"""
 
 import argparse
 import gc
 import sys
 from pathlib import Path
-
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from utils import setup_logger, DATA_LAKE_DIR, PROJECT_ROOT
-from tyre_data import extract_stints, LAP_FEATURES
+from tyre_data import LAP_FEATURES, extract_stints
+from tyre_io import build_prediction_output, load_model_artifacts, log_prediction_complete, save_prediction
 from tyre_model import INPUT_SIZE, monte_carlo_predict, predict_single_stint
-from tyre_io import load_model_artifacts, build_prediction_output, save_prediction, log_prediction_complete
+from utils import DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
 
 logger = setup_logger(__name__)
 

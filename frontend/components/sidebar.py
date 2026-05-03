@@ -12,6 +12,8 @@ import pandas as pd
 import streamlit as st
 
 @st.cache_data(show_spinner=False)
+
+
 def _convert_df_to_csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
@@ -29,6 +31,8 @@ from components.data_loader import get_event_schedule, load_session_data, load_m
 
 
 @dataclass
+
+
 class SidebarSelections:
     """Container for all sidebar filter selections."""
 
@@ -103,9 +107,11 @@ def _get_default_index(key: str, options: list) -> int:
 _DOT_GREEN: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#00ff88;box-shadow:0 0 5px #00ff88;margin-right:6px"></span>'
 _DOT_GRAY: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3a4558;margin-right:6px"></span>'
 
+
 def _status_dot(is_active: bool) -> str:
     """Returns the HTML span string for a green or gray dot."""
     return _DOT_GREEN if is_active else _DOT_GRAY
+
 
 def _derive_output_paths(session_filepath: str, driver_number: str) -> Dict[str, str]:
     """Derives output paths for models based on the session and driver."""
@@ -157,16 +163,16 @@ def render_sidebar() -> SidebarSelections:
     if not driver_labels:
         st.error("No drivers found in this session.")
         st.stop()
-        
+
     driver_idx = _get_default_index("sel_driver", driver_labels)
     selected_driver_label = st.sidebar.selectbox(
         "Driver", driver_labels, index=driver_idx, key="sel_driver"
     )
-    
+
     if selected_driver_label is None:
         st.error("Please select a driver.")
         st.stop()
-        
+
     driver_number = selected_driver_label.split(" (#")[1].replace(")", "")
     driver_name = selected_driver_label.split(" (#")[0]
 

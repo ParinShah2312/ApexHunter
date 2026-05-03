@@ -3,11 +3,12 @@ ApexHunter Frontend - Racing Line
 Renders the racing line analysis tab with algorithm path overlays,
 track boundary polygons, and per-corner deviation charts.
 """
-import streamlit as st
-import plotly.graph_objects as go
+from typing import Optional
+
 import numpy as np
 import pandas as pd
-from typing import Optional
+import plotly.graph_objects as go
+import streamlit as st
 
 ALGO_COLORS = {
     "astar": "#a855f7",     # purple
@@ -19,6 +20,7 @@ ALGO_LABELS = {
     "dijkstra": "Dijkstra",
     "bfs": "BFS",
 }
+
 
 def _build_racing_line_figure(
     racing_line_data: dict,
@@ -36,7 +38,7 @@ def _build_racing_line_figure(
         pts = pts_new
 
     algo_data = racing_line_data.get("algorithms", {}).get(algo_key, {})
-    
+
     # Compute normal vectors to build inner/outer physical track edges
     dx = np.gradient(pts[:, 0])
     dy = np.gradient(pts[:, 1])
@@ -44,28 +46,28 @@ def _build_racing_line_figure(
     length[length == 0] = 1 # Avoid division by zero
     nx = -dy / length
     ny = dx / length
-    
+
     # 300 units makes the track very wide, providing massive visibility
     # for the driver and algorithm paths inside it.
     half_width = 300
-    
+
     outer_x = pts[:, 0] + nx * half_width
     outer_y = pts[:, 1] + ny * half_width
     inner_x = pts[:, 0] - nx * half_width
     inner_y = pts[:, 1] - ny * half_width
-    
+
     # Close the loops (this will draw a straight line across the start/finish)
     outer_x = np.append(outer_x, outer_x[0])
     outer_y = np.append(outer_y, outer_y[0])
     inner_x = np.append(inner_x, inner_x[0])
     inner_y = np.append(inner_y, inner_y[0])
-    
+
     # Combine outer and reversed inner to create a single filled polygon
     track_x = np.concatenate([outer_x, inner_x[::-1]])
     track_y = np.concatenate([outer_y, inner_y[::-1]])
 
     fig = go.Figure()
-    
+
     # 1. Track Surface Polygon
     fig.add_trace(go.Scatter(
         x=track_x, y=track_y,
@@ -99,7 +101,7 @@ def _build_racing_line_figure(
 
     # 4. Add Annotations for Start/Finish and Turns
     if len(pts) >= 65:
-        # We manually map the 15 Bahrain turns and provide exact X/Y coordinate offsets 
+        # We manually map the 15 Bahrain turns and provide exact X/Y coordinate offsets
         # to prevent any overlap and place them perfectly like the F1 graphic.
         # (index, label, dx, dy)
         bahrain_corners = [
@@ -119,7 +121,7 @@ def _build_racing_line_figure(
             (59, "T14", 1500,  -1500),  # bottom-right (outside)
             (61, "T15", 0,     -1500)   # bottom (outside)
         ]
-        
+
         # Start/Finish Line
         fig.add_annotation(
             x=pts[0, 0],
@@ -139,7 +141,7 @@ def _build_racing_line_figure(
             borderwidth=1,
             borderpad=4
         )
-        
+
         # Plot T1-T15
         for idx, label, dx, dy in bahrain_corners:
             fig.add_annotation(
@@ -176,6 +178,7 @@ def _build_racing_line_figure(
     )
     return fig
 
+
 def _build_deviation_chart(
     racing_line_data: dict,
     algo_key: str
@@ -187,16 +190,16 @@ def _build_deviation_chart(
         pts_new[:, 0] = -pts[:, 1]
         pts_new[:, 1] = pts[:, 0]
         pts = pts_new
-        
+
     algo_data = racing_line_data.get("algorithms", {}).get(algo_key, {})
     opt_path = algo_data.get("path", [])
     opt_x = [-p[1] for p in opt_path]
     opt_y = [p[0] for p in opt_path]
     scale = racing_line_data.get("coordinate_scale", 1.0)
-    
+
     corners = []
     deviations = []
-    
+
     bahrain_corners = [
         (7,  "T1",  -1500, -1500),
         (9,  "T2",  -1500, 0),
@@ -214,14 +217,14 @@ def _build_deviation_chart(
         (59, "T14", 1500,  -1500),
         (61, "T15", 0,     -1500)
     ]
-    
+
     opt_arr = np.column_stack((opt_x, opt_y))
-    
+
     from scipy.interpolate import interp1d
     opt_dist = np.zeros(len(opt_arr))
     opt_dist[1:] = np.linalg.norm(opt_arr[1:] - opt_arr[:-1], axis=1)
     opt_cum_dist = np.cumsum(opt_dist)
-    
+
     if opt_cum_dist[-1] > 0:
         f_x = interp1d(opt_cum_dist, opt_arr[:, 0], kind='linear')
         f_y = interp1d(opt_cum_dist, opt_arr[:, 1], kind='linear')
@@ -229,18 +232,18 @@ def _build_deviation_chart(
         opt_arr_fine = np.column_stack((f_x(fine_dist), f_y(fine_dist)))
     else:
         opt_arr_fine = opt_arr
-    
+
     for idx, label, _, _ in bahrain_corners:
         corners.append(label)
         window_pts = pts[max(0, idx-1):min(len(pts), idx+2)]
         dists = []
         for dp in window_pts:
             dists.append(np.linalg.norm(opt_arr_fine - dp, axis=1).min())
-        
+
         max_dev_units = max(dists) if dists else 0
         dev_m = max_dev_units * scale
         deviations.append(dev_m)
-    
+
     dev_fig = go.Figure(go.Bar(
         x=corners,
         y=deviations,
@@ -248,7 +251,7 @@ def _build_deviation_chart(
         text=[f"{d:.1f}m" for d in deviations],
         textposition="auto"
     ))
-    
+
     dev_fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0d1520",
@@ -266,12 +269,12 @@ def render_racing_line(
     df_full: Optional[pd.DataFrame] = None
 ) -> None:
     """
-    Step 1 of the new UI build: 
-    Perfect Track Boundaries. We calculate normal vectors to plot a physical track 
+    Step 1 of the new UI build:
+    Perfect Track Boundaries. We calculate normal vectors to plot a physical track
     polygon that won't overlap when zoomed out.
     """
     st.header("Racing Line Analysis")
-    
+
     # ── Algorithm Selection ───────────────────────────────────────────────────
     selected_algo = st.radio("Select Algorithm", ["A* Search", "Dijkstra", "BFS"], horizontal=True)
     if selected_algo == "A* Search":
@@ -280,7 +283,7 @@ def render_racing_line(
         algo_key = "dijkstra"
     else:
         algo_key = "bfs"
-    
+
     if not racing_line_data:
         st.warning(
             "No optimal racing line output found for this session and driver.\n\n"
@@ -295,16 +298,16 @@ def render_racing_line(
             "Run: `python backend/scripts/optimal_line.py --session <path> --driver <code>`"
         )
         return
-        
+
     algo_data = racing_line_data.get("algorithms", {}).get(algo_key, {})
-    
+
     if not algo_data or not algo_data.get("found"):
         st.warning(
             "No optimal racing line output found for this session and driver.\n\n"
             "Run: `python backend/scripts/optimal_line.py --session <path> --driver <code>`"
         )
         return
-        
+
     fig = _build_racing_line_figure(racing_line_data, algo_key, selected_algo, driver_number)
     st.plotly_chart(fig, width="stretch")
 
@@ -312,6 +315,6 @@ def render_racing_line(
     if len(pts) >= 65:
         st.markdown(f"### Corner-by-Corner Deviation ({selected_algo})")
         st.caption(f"Physical distance between the driver's path and the {selected_algo} line at each specific turn apex.")
-        
+
         dev_fig = _build_deviation_chart(racing_line_data, algo_key)
         st.plotly_chart(dev_fig, width="stretch")

@@ -1,5 +1,13 @@
-"""Training orchestrator for the ApexHunter LSTM tyre cliff predictor.
-Builds dataset, runs hyperparameter search, trains final model."""
+"""
+================================================================================
+  ApexHunter - LSTM Tyre Cliff Trainer
+  Script: train_lstm.py
+--------------------------------------------------------------------------------
+  Purpose : Training orchestrator for the ApexHunter LSTM tyre cliff predictor.
+
+  Usage   : python backend/scripts/train_lstm.py [--seasons 2024] [--force]
+================================================================================
+"""
 
 import argparse
 import gc
@@ -11,13 +19,13 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from utils import setup_logger, DATA_LAKE_DIR, PROJECT_ROOT
-from tyre_data import build_training_dataset, SEQUENCE_LENGTH
+from tyre_data import SEQUENCE_LENGTH, build_training_dataset
+from tyre_io import log_dataset_stats, log_training_complete, log_training_start, save_model_artifacts
 from tyre_model import (
-    INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE,
-    run_hyperparameter_search, train_final_model, evaluate_on_test,
+    DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS,
+    evaluate_on_test, run_hyperparameter_search, train_final_model,
 )
-from tyre_io import save_model_artifacts, log_training_start, log_dataset_stats, log_training_complete
+from utils import DATA_LAKE_DIR, IST, PROJECT_ROOT, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -113,7 +121,7 @@ def main() -> None:
         "val_mse": best_val_mse,
         "test_mae_kmh": mae,
         "seasons": args.seasons,
-        "trained_at": datetime.utcnow().isoformat(),
+        "trained_at": datetime.now(IST).isoformat(),
     }
     save_model_artifacts(final_model, scaler, config, models_dir, logger)
     gc.collect()

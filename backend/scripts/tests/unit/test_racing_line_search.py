@@ -1,7 +1,8 @@
-import logging
-import unittest
+"""Unit tests for racing_line_search — A*, Dijkstra, BFS, and deviation."""
 
+import logging
 import sys
+import unittest
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
@@ -22,7 +23,7 @@ class TestRacingLineSearch(unittest.TestCase):
     def setUp(self):
         self.logger = logging.getLogger("test")
         self.logger.setLevel(logging.CRITICAL)  # Silence logger for tests
-        
+
         self.grid = {}
         for i in range(5):
             for j in range(5):
@@ -36,7 +37,7 @@ class TestRacingLineSearch(unittest.TestCase):
                     weight=1.0,
                     point_count=1
                 )
-                
+
         self.adj = {}
         offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
         for i in range(5):

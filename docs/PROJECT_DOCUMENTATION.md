@@ -161,11 +161,33 @@ flowchart TD
     T7 --> L1
 ```
 
-## 1.4 MongoDB Integration (Planned)
+## 1.4 Big Data Integration
 
-### Why MongoDB Over Spark and Hadoop
+### HDFS Storage Layer
 
-The decision to plan MongoDB as the persistence layer — rather than Apache Spark or Hadoop — is driven by the project's operational profile:
+The project integrates with Hadoop Distributed File System (HDFS) for scalable storage of raw and cleaned telemetry data. The `hdfs_manager.py` script manages uploads, verification, statistics gathering, and status log generation.
+
+| Property | Detail |
+|---|---|
+| **Script** | `backend/scripts/hdfs_manager.py` |
+| **HDFS paths** | `/apexhunter/season_data/`, `/apexhunter/clean_data/`, `/apexhunter/mistake_data/` |
+| **Operations** | Upload, verify, statistics, status log generation |
+| **Status log** | `data_lake/bigdata_status/hdfs_status.json` — consumed by the Streamlit Big Data tab |
+
+### Apache Spark ETL Pipeline
+
+The Spark ETL pipeline reads raw season telemetry data, applies cleaning transformations (null-drop, forward-fill, clip, float-cast), and writes partitioned Parquet output.
+
+| Property | Detail |
+|---|---|
+| **Script** | `backend/scripts/spark_clean_telemetry.py` |
+| **Modes** | Local filesystem or HDFS (`--hdfs` flag) |
+| **Transformations** | Null drop, forward fill, domain clipping, float casting |
+| **Output** | Partitioned Parquet files via Spark DataFrame writer |
+
+### MongoDB Integration
+
+MongoDB serves as the document-oriented persistence layer for mistake annotations, telemetry metadata, and session analytics.
 
 | Factor | MongoDB | Apache Spark / Hadoop |
 |---|---|---|
@@ -290,15 +312,16 @@ flowchart TD
     DL --> PV["processed_video/\n← YOLO HUD overlay MP4 output"]
     DL --> PC["processed_csv/\n← Apex deviation metrics CSV\nPer-frame distance + status"]
     DL --> MD["mistake_data/\n← Isolation Forest annotated parquets\n+ metadata JSON per driver per session"]
-    DL --> TP["(planned) tyre_predictions/\n← LSTM cliff-lap JSON documents"]
-    DL --> RLR["(planned) racing_line_results/\n← A*, Dijkstra, BFS path JSON"]
+    DL --> TP["tyre_predictions/\n← LSTM cliff-lap JSON documents"]
+    DL --> RLR["racing_lines/\n← A*, Dijkstra, BFS path JSON"]
+    DL --> BDS["bigdata_status/\n← HDFS, Spark, MongoDB status logs"]
 ```
 
 ### Section Status Summary
 
-**Built and operational:** The full ETL pipeline (Extract → Transform → Load) is complete and has processed all 92 session files across the 2023 and 2024 seasons. The data lake directory structure is established and populated. The Streamlit frontend reads exclusively from cleaned data and provides instant session/driver switching.
+**Built and operational:** The full ETL pipeline (Extract → Transform → Load) is complete and has processed all 92 session files across the 2023 and 2024 seasons. The data lake directory structure is established and populated. The Streamlit frontend reads exclusively from cleaned data and provides instant session/driver switching. HDFS integration is built via `hdfs_manager.py`, Apache Spark ETL via `spark_clean_telemetry.py`, and MongoDB integration via `mongo_manager.py`. The Big Data analytics tab in the dashboard provides real-time pipeline monitoring, storage statistics, and visual analytics across all three distributed systems.
 
-**Planned:** MongoDB integration is designed but not yet implemented. The collection schema and document structures are specified above and will be integrated into the pipeline via `pymongo` in a future development phase. The `tyre_predictions/` and `racing_line_results/` directories are placeholders for upcoming AI module outputs.
+**Timezone:** All timestamps across the project use IST (UTC+05:30), defined centrally in `utils.py`.
 
 ---
 
@@ -442,7 +465,7 @@ python backend/scripts/detect_mistakes.py \
 | `--output-dir` | No | Output directory; defaults to `data_lake/mistake_data/` |
 | `--force` | No | Overwrite existing output files |
 
-## 2.3 LSTM Tyre Cliff Predictor (Planned — Phase 2)
+## 2.3 LSTM Tyre Cliff Predictor
 
 ### Problem Statement
 
@@ -450,31 +473,34 @@ Formula 1 tyres degrade non-linearly over a stint. For the first several laps, d
 
 Predicting which lap the cliff will occur is strategically valuable for pit-stop timing. A team that can anticipate the cliff by even 1–2 laps can pit proactively, undercutting rivals who wait too long and lose time on degraded tyres. This is modelled as a **time-series regression problem**: given a sequence of per-lap telemetry aggregates, predict the lap time trajectory for the remaining laps in the stint and identify the cliff point.
 
-### Architecture (Planned)
+### Architecture
+
+The LSTM network is implemented in `backend/scripts/tyre_model.py` as `TyreCliffLSTM`:
 
 | Component | Detail |
 |---|---|
-| **Input** | Per-lap aggregated telemetry features: mean Speed, mean Throttle, mean Brake, lap number within stint, compound type (one-hot encoded) |
-| **Network** | 2 stacked LSTM layers with Dropout between them |
-| **Output** | Predicted lap time for next N laps, with confidence bounds |
+| **Input** | Per-lap aggregated telemetry features: mean Speed, mean Throttle, mean Brake, mean RPM, tyre age, compound type (3 one-hot: `is_soft`, `is_medium`, `is_hard`), race lap number — 9 features total |
+| **Network** | 2 stacked LSTM layers (`nn.LSTM`) with configurable hidden size, dropout between layers |
+| **Output** | Single regression value — predicted lap time delta for the next lap |
 | **Loss function** | MSE (Mean Squared Error) |
-| **Optimiser** | Adam |
-| **Regularisation** | Dropout layers (rate to be determined by hyperparameter search) to prevent overfitting on specific track layouts |
+| **Optimiser** | Adam with configurable learning rate |
+| **Regularisation** | Dropout (rate = 0.2) between LSTM layers to prevent overfitting on specific track layouts |
+| **Uncertainty** | Monte Carlo Dropout inference (20 forward passes with dropout enabled) provides mean, lower bound, and upper bound predictions |
 
 ### Hyperparameter Tuning
 
-**RandomSearchCV** will be used to search over the following hyperparameter space:
+**Grid search** is used to search over the following hyperparameter space:
 
-| Hyperparameter | Search Range |
-|---|---|
-| Number of hidden units | 32, 64, 128, 256 |
-| Learning rate | 1e-4 to 1e-2 (log-uniform) |
-| Dropout rate | 0.1 to 0.5 |
-| Number of LSTM layers | 1, 2, 3 |
-| Batch size | 16, 32, 64 |
-| Sequence length | 5, 8, 12 laps |
+| Hyperparameter | Search Range | Selected |
+|---|---|---|
+| Number of hidden units | 32, 64, 128, 256 | Determined per training run |
+| Learning rate | 1e-4, 5e-4, 1e-3 | Best by validation MSE |
+| Dropout rate | 0.2 (fixed) | — |
+| Number of LSTM layers | 2 (fixed) | — |
+| Batch size | 32 (fixed) | — |
+| Sequence length | 5 laps (fixed) | — |
 
-### Output Format (Planned)
+### Output Format
 
 Per-driver per-stint JSON document:
 
@@ -501,9 +527,41 @@ Per-driver per-stint JSON document:
 
 ### Evaluation
 
-The primary evaluation metric is **MAE (Mean Absolute Error)** between predicted and actual lap times per stint. This directly measures how accurately the model forecasts pace degradation. Secondary metrics include cliff-lap prediction accuracy (±1 lap tolerance) and per-compound MAE breakdowns.
+### CLI Usage
 
-## 2.4 Racing Line Search Algorithms (Planned — Phase 3)
+**Training:**
+```bash
+python backend/scripts/train_lstm.py --seasons 2024 --force
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `--seasons` | No | Comma-separated season years (default: `2024`) |
+| `--force` | No | Retrain even if model artifacts exist |
+| `--test-split` | No | Fraction of data held out for test evaluation (default: `0.2`) |
+
+**Prediction:**
+```bash
+python backend/scripts/predict_cliff.py --session data_lake/clean_data/2024_1_R.parquet --driver 1
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `--session` | Yes | Path to the cleaned parquet session file |
+| `--driver` | Yes | Driver code (e.g. `"1"` for Verstappen) |
+| `--force` | No | Overwrite existing prediction output |
+
+### Module Structure
+
+| Module | File | Responsibility |
+|---|---|---|
+| **Data** | `tyre_data.py` | Stint detection via FastF1 lap markers, lap aggregation, sequence generation |
+| **Model** | `tyre_model.py` | `TyreCliffLSTM` architecture, training loop, hyperparameter search, Monte Carlo inference |
+| **I/O** | `tyre_io.py` | Model artifact persistence, scaler serialization, prediction output writing |
+| **Train** | `train_lstm.py` | Training orchestrator — data loading, scaling, grid search, final model fitting |
+| **Predict** | `predict_cliff.py` | Prediction orchestrator — model loading, stint extraction, per-stint prediction |
+
+## 2.4 Racing Line Search Algorithms
 
 ### Problem Statement
 
@@ -573,7 +631,7 @@ flowchart TD
     F --> G["Output JSON\npath_coordinates, path_cost,\nnodes_expanded, per_corner_deviation"]
 ```
 
-### Output Format (Planned)
+### Output Format
 
 Per-session per-algorithm JSON:
 
@@ -598,14 +656,18 @@ Per-session per-algorithm JSON:
 | Model | Tuning Method | Parameters Tuned | Status |
 |---|---|---|---|
 | **Isolation Forest** | K-Fold Grid Search (5 folds × 6 values = 30 fits) | `contamination` ∈ [0.05, 0.08, 0.10, 0.12, 0.15, 0.20] | ✅ Built — scoring by mean |decision_function| on held-out folds |
-| **LSTM Tyre Cliff** | RandomSearchCV | Hidden units, learning rate, dropout rate, number of LSTM layers, batch size, sequence length | 📋 Planned |
+| **LSTM Tyre Cliff** | Grid Search | Hidden units ∈ [32, 64, 128, 256], learning rate ∈ [1e-4, 5e-4, 1e-3] | ✅ Built — best config selected by validation MSE |
 | **YOLOv11-Seg** | Bayesian evolution (Ultralytics built-in) | Learning rate, momentum, weight decay, augmentation parameters, anchor ratios | ✅ Built — fine-tuned from COCO pre-trained weights |
 
 ### Section Status Summary
 
-**Built and operational:** The Isolation Forest pipeline is fully implemented across four modular scripts (`detect_mistakes.py`, `mistakes_features.py`, `mistakes_model.py`, `mistakes_io.py`). It supports arbitrary session/driver combinations via CLI, includes K-Fold cross-validated contamination selection, and outputs both annotated parquets and metadata JSON. The YOLOv11-Seg model is trained, and inference is operational (detailed in Section 3).
+**Built and operational:** All three AI pipelines are fully implemented:
+- **Isolation Forest** — 4 modular scripts (`detect_mistakes.py`, `mistakes_features.py`, `mistakes_model.py`, `mistakes_io.py`). Supports arbitrary session/driver combinations via CLI, includes K-Fold cross-validated contamination selection.
+- **LSTM Tyre Cliff Predictor** — 5 modular scripts (`tyre_data.py`, `tyre_model.py`, `tyre_io.py`, `train_lstm.py`, `predict_cliff.py`). Features Monte Carlo dropout uncertainty estimation, hyperparameter grid search, and per-stint cliff detection.
+- **Racing Line Search** — 4 modular scripts (`racing_line_grid.py`, `racing_line_search.py`, `racing_line_io.py`, `optimal_line.py`). Implements A*, Dijkstra, and BFS on a telemetry-weighted grid with per-corner deviation analysis.
+- **YOLOv11-Seg** — Fully operational CV pipeline (detailed in Section 3).
 
-**Planned:** The LSTM Tyre Cliff Predictor (Phase 2) and Racing Line Search Algorithms (Phase 3) are designed and specified above but not yet implemented. Their output schemas are defined, and the data lake directory structure includes placeholder directories for their outputs.
+All timestamps use IST (UTC+05:30).
 
 ---
 
@@ -845,6 +907,4 @@ The satellite images provide real-world geographic context for the telemetry coo
 
 ### Section Status Summary
 
-**Built and operational:** The full CV pipeline is complete — from frame extraction (`extract_frames.py`, `select_training_frames.py`) through model training (YOLOv11-Seg on Google Colab) to inference (`run_inference.py` with four supporting modules). The pipeline produces HUD overlay videos and per-frame metrics CSVs. The satellite image download pipeline is also complete.
-
-**Planned:** Integration of the per-frame metrics CSV into the frontend Race Intelligence tab is planned. The Apex Accuracy KPI computation and dashboard widget are designed but not yet wired into the Streamlit interface.
+**Built and operational:** The full CV pipeline is complete — from frame extraction (`extract_frames.py`, `select_training_frames.py`) through model training (YOLOv11-Seg on Google Colab) to inference (`run_inference.py` with four supporting modules). The pipeline produces HUD overlay videos and per-frame metrics CSVs. The satellite image download pipeline is also complete. The CV video feed is integrated in the frontend via `cv_feed.py`, providing in-dashboard video playback with apex deviation metrics.

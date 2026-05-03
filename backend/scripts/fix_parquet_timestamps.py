@@ -1,7 +1,15 @@
 """
-Fix parquet files that use nanosecond timestamps (incompatible with Spark 3.x).
-Re-writes them in-place with microsecond precision.
+================================================================================
+  ApexHunter - Parquet Timestamp Fixer
+  Script: fix_parquet_timestamps.py
+--------------------------------------------------------------------------------
+  Purpose : Re-writes parquet files in-place with microsecond precision to
+            resolve nanosecond timestamp incompatibility with Spark 3.x.
+
+  Usage   : python backend/scripts/fix_parquet_timestamps.py
+================================================================================
 """
+
 import sys
 from pathlib import Path
 
@@ -9,7 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pyarrow.parquet as pq
-from utils import setup_logger, DATA_LAKE_DIR
+
+from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)
 

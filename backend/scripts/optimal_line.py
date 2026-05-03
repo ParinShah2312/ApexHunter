@@ -1,18 +1,28 @@
-"""Orchestrator for the ApexHunter racing line search pipeline.
-Builds a weighted grid from telemetry, runs A*, Dijkstra, and BFS, and saves
-results to a JSON file for frontend rendering."""
+"""
+================================================================================
+  ApexHunter - Racing Line Search Pipeline
+  Script: optimal_line.py
+--------------------------------------------------------------------------------
+  Purpose : Builds a weighted grid from telemetry, runs A*, Dijkstra, and BFS,
+            and saves results to a JSON file for frontend rendering.
+
+  Usage   : python backend/scripts/optimal_line.py --session <path> --driver <code>
+================================================================================
+"""
 
 import argparse
 import gc
 import sys
 from pathlib import Path
 
-from racing_line_io import build_output, compute_time_saved, load_and_validate, save_output, fetch_fastest_lap_bounds, log_racing_line_complete
 from racing_line_grid import DEFAULT_GRID_RESOLUTION, build_adjacency, build_grid, compute_coordinate_scale, find_start_end_nodes, get_nearest_node, get_node_for_row
-from racing_line_search import astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, SearchResult, run_full_lap
+from racing_line_io import build_output, compute_time_saved, fetch_fastest_lap_bounds, load_and_validate, log_racing_line_complete, save_output
+from racing_line_search import SearchResult, astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, run_full_lap
 from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)
+
+
 def run_pipeline(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir) if args.output_dir else DATA_LAKE_DIR / "racing_lines"
     stem = Path(args.session).stem
@@ -97,7 +107,7 @@ def main() -> None:
     p.add_argument("--n-corners", type=int, default=16, help="Number of corners.")
     p.add_argument("--output-dir", type=str, default=None, help="Output directory.")
     p.add_argument("--force", action="store_true", help="Overwrite existing output.")
-    
+
     try:
         run_pipeline(p.parse_args())
     except SystemExit:

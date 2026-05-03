@@ -100,6 +100,7 @@ _DARK_THEME_CSS: str = """
     </style>
 """
 
+
 def _get_session_time_range(df: pd.DataFrame) -> Tuple[float, float]:
     """Calculate the minimum and maximum session time in seconds."""
     time_col = "SessionTime" if "SessionTime" in df.columns else "Time"
@@ -136,7 +137,7 @@ components.html(
         doc.querySelectorAll('div[data-baseweb="select"] input').forEach(el => {
             if (el._locked) return;
             el._locked = true;
-            
+
             // 1. Make readonly
             el.setAttribute('readonly', 'true');
 

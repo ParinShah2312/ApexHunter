@@ -5,6 +5,7 @@ Renders the YOLO-processed video player, status badge, and CV stat cards.
 
 import math
 from pathlib import Path
+from typing import List
 
 import pandas as pd
 import streamlit as st
@@ -13,18 +14,18 @@ from config import PROCESSED_CSV_DIR, PROCESSED_VIDEO_DIR
 from components.data_loader import load_cv_metrics
 
 
-from typing import List
-
 def _find_available_videos() -> List[Path]:
     """Return sorted list of .mp4 files in PROCESSED_VIDEO_DIR."""
     if not PROCESSED_VIDEO_DIR.exists():
         return []
     return sorted(PROCESSED_VIDEO_DIR.glob("*.mp4"))
 
+
 def _get_current_status(df_cv: pd.DataFrame, scrub_seconds: float) -> str:
     """Return the apex status string for the frame closest to scrub_seconds."""
     closest_idx = (df_cv["timestamp_sec"] - scrub_seconds).abs().idxmin()
     return str(df_cv.loc[closest_idx, "status"])
+
 
 def _status_badge_html(status: str) -> str:
     """Return the styled HTML badge for the given apex status string."""
@@ -41,6 +42,7 @@ def _status_badge_html(status: str) -> str:
         f'font-size:13px;margin-bottom:8px">{status}</div>'
     )
 
+
 def _render_proportion_bar(hitting: int, near: int, missing: int, total_curb: int) -> None:
     """Render the colored proportion bar as st.markdown."""
     st.markdown(
@@ -51,6 +53,7 @@ def _render_proportion_bar(hitting: int, near: int, missing: int, total_curb: in
         f'</div>',
         unsafe_allow_html=True,
     )
+
 
 def render_cv_feed(scrub_seconds: float) -> None:
     """Renders the CV video feed panel with status badge and stat cards."""
@@ -80,7 +83,7 @@ def render_cv_feed(scrub_seconds: float) -> None:
         )
 
     video_path = PROCESSED_VIDEO_DIR / selected_filename
-    
+
     # Pass the absolute file path directly to st.video so Streamlit uses its internal media server
     # This enables efficient streaming and seeking (range requests) instead of crashing the websocket with 279MB of bytes.
     st.video(str(video_path.absolute()), format="video/mp4")

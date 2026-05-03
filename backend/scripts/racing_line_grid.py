@@ -25,6 +25,8 @@ MAX_SPEED_FOR_WEIGHT: float = 380.0
 MAX_BRAKE_FOR_WEIGHT: float = 100.0
 
 @dataclass
+
+
 class GridNode:
     grid_i: int
     grid_j: int
@@ -38,14 +40,14 @@ class GridNode:
 
 def compute_node_weight(mean_speed: float, mean_brake: float) -> float:
     """Compute the traversal cost of a grid node from speed and brake values.
-    
+
     Lower cost = better for the racing line. High speed = low cost.
     High braking = high cost.
-    
+
     Args:
         mean_speed: The mean speed of the node.
         mean_brake: The mean brake of the node.
-        
+
     Returns:
         The computed traversal cost.
     """
@@ -62,6 +64,7 @@ def _compute_grid_indices(df: pd.DataFrame, x_min: float, y_min: float, resoluti
     df_grid["grid_j"] = ((df_grid["Y"] - y_min) / resolution).astype(int)
     return df_grid
 
+
 def _aggregate_cells(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregate points inside each grid cell."""
     grouped = df.groupby(["grid_i", "grid_j"]).agg(
@@ -72,6 +75,7 @@ def _aggregate_cells(df: pd.DataFrame) -> pd.DataFrame:
         center_y=("Y", "mean")
     ).reset_index()
     return grouped[grouped["point_count"] >= MIN_POINTS_PER_CELL]
+
 
 def _create_grid_nodes(grouped: pd.DataFrame) -> Dict[Tuple[int, int], GridNode]:
     """Create GridNode objects from aggregated cell data."""
@@ -93,26 +97,27 @@ def _create_grid_nodes(grouped: pd.DataFrame) -> Dict[Tuple[int, int], GridNode]
         grid[(i, j)] = node
     return grid
 
+
 def build_grid(
     df: pd.DataFrame,
     resolution: float = DEFAULT_GRID_RESOLUTION
 ) -> Dict[Tuple[int, int], GridNode]:
     """Discretize telemetry X/Y coordinates into a 2D grid of weighted nodes.
-    
+
     Args:
         df: The telemetry DataFrame.
         resolution: Grid cell size in coordinate units.
-        
+
     Returns:
         A dictionary mapping (i, j) coordinates to GridNode objects.
     """
     x_min = df["X"].min()
     y_min = df["Y"].min()
-    
+
     df_grid = _compute_grid_indices(df, x_min, y_min, resolution)
     grouped = _aggregate_cells(df_grid)
     grid = _create_grid_nodes(grouped)
-        
+
     logger.info(f"Grid built: {len(grid)} valid nodes at resolution={resolution}")
     gc.collect()
     return grid
@@ -122,20 +127,20 @@ def build_adjacency(
     grid: Dict[Tuple[int, int], GridNode]
 ) -> Dict[Tuple[int, int], List[Tuple[Tuple[int, int], float]]]:
     """Build the 8-connected adjacency list for the grid.
-    
+
     Each node connects to its up to 8 neighbors (cardinal + diagonal) if they exist.
     Edge cost is the average of the two nodes' weights multiplied by the Euclidean
     distance between their centers.
-    
+
     Args:
         grid: The node dictionary built by build_grid.
-        
+
     Returns:
         Adjacency dictionary mapping node coordinates to lists of (neighbor_coord, cost).
     """
     adjacency = {}
     offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-    
+
     for (i, j), node in grid.items():
         neighbors = []
         for di, dj in offsets:
@@ -149,7 +154,7 @@ def build_adjacency(
                 neighbors.append((neighbor_key, edge_cost))
         if neighbors:
             adjacency[(i, j)] = neighbors
-            
+
     logger.info(f"Adjacency built: {sum(len(v) for v in adjacency.values())} total edges")
     gc.collect()
     return adjacency
@@ -161,29 +166,29 @@ def get_nearest_node(
     target_j: int
 ) -> Tuple[int, int]:
     """Find the grid node key closest to the given (i, j) indices.
-    
+
     Used when the exact target cell is not a valid node (off-track).
-    
+
     Args:
         grid: The valid node dictionary.
         target_i: The target column index.
         target_j: The target row index.
-        
+
     Returns:
         The (i, j) tuple of the nearest valid grid node.
     """
     if not grid:
         raise ValueError("Grid is empty - cannot find nearest node.")
-        
+
     nearest_key = None
     min_dist = float('inf')
-    
+
     for key in grid:
         dist = abs(key[0] - target_i) + abs(key[1] - target_j)
         if dist < min_dist:
             min_dist = dist
             nearest_key = key
-            
+
     return nearest_key
 
 
@@ -194,13 +199,13 @@ def find_start_end_nodes(
     adjacency: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], float]]]
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """Find start and end grid nodes for pathfinding within the largest connected component.
-    
+
     Args:
         grid: The node dictionary.
         df: The telemetry DataFrame.
         resolution: The resolution used to build the grid.
         adjacency: The adjacency dictionary.
-        
+
     Returns:
         A tuple containing the start and end node (i, j) coordinates.
     """
@@ -226,10 +231,10 @@ def find_start_end_nodes(
     df_filtered = df[df["Speed"] > 10].sort_values("SessionTime")
     if df_filtered.empty:
         df_filtered = df.sort_values("SessionTime")
-    
+
     x_min = df_filtered["X"].min()
     y_min = df_filtered["Y"].min()
-    
+
     # Keep only rows that map to the largest component
     valid_rows = []
     for row in df_filtered.itertuples():
@@ -237,16 +242,16 @@ def find_start_end_nodes(
         j = int((row.Y - y_min) / resolution)
         if (i, j) in largest_comp:
             valid_rows.append(row)
-            
+
     if not valid_rows:
         logger.warning("No telemetry points fall into the largest connected component!")
         valid_rows = list(df_filtered.itertuples()) # Fallback
-        
+
     start_row = valid_rows[0]
     start_i = int((start_row.X - x_min) / resolution)
     start_j = int((start_row.Y - y_min) / resolution)
     start_key = (start_i, start_j) if (start_i, start_j) in grid else get_nearest_node(grid, start_i, start_j)
-    
+
     # Always use the furthest node in the connected component as the end node
     # to guarantee we compute a long, track-spanning path rather than a tiny hop.
     furthest_key = start_key
@@ -257,7 +262,7 @@ def find_start_end_nodes(
             max_dist = dist
             furthest_key = key
     end_key = furthest_key
-    
+
     logger.info(f"Start node: {start_key}, End node (furthest): {end_key}")
     return start_key, end_key
 
@@ -268,43 +273,45 @@ def _compute_arc_length(df: pd.DataFrame) -> float:
     dy = df["Y"].diff().fillna(0.0)
     return float(np.sqrt(dx**2 + dy**2).sum())
 
+
 def _estimate_lap_count(df: pd.DataFrame) -> int:
     """Estimate number of laps based on session duration."""
     session_duration_s = (df["SessionTime"].max() - df["SessionTime"].min()).total_seconds()
     return max(1, round(session_duration_s / APPROX_LAP_SECONDS))
+
 
 def compute_coordinate_scale(
     df: pd.DataFrame,
     circuit_length_km: float
 ) -> float:
     """Derive a scale factor converting coordinate units to meters.
-    
+
     Computed by comparing the total arc length of the telemetry path (in coordinate
     units) to the known circuit length.
-    
+
     Args:
         df: The telemetry DataFrame.
         circuit_length_km: The length of the circuit in kilometers.
-        
+
     Returns:
         The scale factor in meters per coordinate unit.
     """
     df_sorted = df.sort_values("SessionTime")
-    
+
     arc_length_units = _compute_arc_length(df_sorted)
     estimated_laps = _estimate_lap_count(df_sorted)
-    
+
     arc_per_lap_units = arc_length_units / estimated_laps
-    
+
     circuit_length_m = circuit_length_km * 1000.0
     scale = circuit_length_m / arc_per_lap_units if arc_per_lap_units > 0 else 1.0
-    
+
     scale = max(0.001, min(scale, 1.0))
     logger.info(
         f"Coordinate scale: {scale:.6f} m/unit (circuit={circuit_length_km} km, "
         f"arc_per_lap={arc_per_lap_units:.1f} units)"
     )
-    
+
     return scale
 
 
@@ -312,6 +319,6 @@ def get_node_for_row(row, x_min: float, y_min: float, resolution: float, grid: d
     """Get the appropriate grid node for a given telemetry row."""
     i = int((row.X - x_min) / resolution)
     j = int((row.Y - y_min) / resolution)
-    if (i, j) in grid: 
+    if (i, j) in grid:
         return (i, j)
     return get_nearest_node(grid, i, j)

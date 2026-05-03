@@ -10,6 +10,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Test Cache
+.pytest_cache/
+
 # Linter Cache
 .ruff_cache/
 

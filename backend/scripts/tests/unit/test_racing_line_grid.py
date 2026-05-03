@@ -1,10 +1,12 @@
-import unittest
-import numpy as np
-import pandas as pd
-from typing import Dict, Tuple
+"""Unit tests for racing_line_grid — grid construction and adjacency graph."""
 
 import sys
+import unittest
 from pathlib import Path
+from typing import Dict, Tuple
+
+import numpy as np
+import pandas as pd
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))

@@ -10,7 +10,7 @@ from typing import Any, List, Tuple
 
 from sklearn.preprocessing import StandardScaler
 
-from utils import setup_logger
+from utils import IST, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -133,7 +133,7 @@ def build_prediction_output(
     return {
         "session_file": session_path,
         "driver": driver,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(IST).isoformat(),
         "stints": stint_results,
     }
 
@@ -191,7 +191,7 @@ def log_training_start(sessions_dir, models_dir, seasons, test_split, force, log
     logger.info(f"  Seasons        : {seasons}")
     logger.info(f"  Test split     : {test_split}")
     logger.info(f"  Force retrain  : {force}")
-    logger.info(f"  Started at     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  Started at     : {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("#" * 56)
 
 
@@ -226,4 +226,3 @@ def log_training_complete(X_len, best_hidden, best_lr, best_val_mse, mae, total_
     logger.info(f"  Scaler saved   : {models_dir / 'tyre_scaler.pkl'}")
     logger.info(f"  Config saved   : {models_dir / 'tyre_config.json'}")
     logger.info("#" * 56)
-

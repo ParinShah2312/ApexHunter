@@ -92,6 +92,7 @@ def _add_mistakes_traces(fig: go.Figure, df_mistakes: pd.DataFrame) -> None:
             )
         )
 
+
 def _add_speed_trace(fig: go.Figure, df_filtered: pd.DataFrame) -> None:
     """Add the speed-colored track trace to the figure."""
     df_map = downsample(df_filtered, max_points=8000)
@@ -116,6 +117,7 @@ def _add_speed_trace(fig: go.Figure, df_filtered: pd.DataFrame) -> None:
             showlegend=False,
         )
     )
+
 
 def _add_optimal_line_traces(
     fig: go.Figure,
@@ -153,10 +155,10 @@ def _add_optimal_line_traces(
         else:
             min_t = float(df_filtered[time_col].min())
             max_t = float(df_filtered[time_col].max())
-            
+
         fraction = (scrub_seconds - min_t) / (max_t - min_t) if max_t > min_t else 0.0
         ghost_pos = _interpolate_path_position(path, fraction)
-        
+
         if ghost_pos is not None:
             fig.add_trace(go.Scatter(
                 x=[ghost_pos[0]],
@@ -171,6 +173,7 @@ def _add_optimal_line_traces(
                 name="Ghost (optimal)",
                 hovertemplate="Ghost position (A* optimal)<extra></extra>"
             ))
+
 
 def _add_driver_position(fig: go.Figure, df_filtered: pd.DataFrame, scrub_seconds: float) -> None:
     """Add the driver's current position to the figure based on scrub_seconds."""
@@ -202,6 +205,7 @@ def _add_driver_position(fig: go.Figure, df_filtered: pd.DataFrame, scrub_second
                 showlegend=False,
             )
         )
+
 
 def _build_track_figure(show_legend: bool) -> go.Figure:
     """Create the base figure layout for the track map."""

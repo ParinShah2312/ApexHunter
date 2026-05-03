@@ -13,6 +13,8 @@ from config import DRIVER_MAPPING, TEAM_MAPPING
 
 
 @st.cache_data(show_spinner=False)
+
+
 def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number: str) -> str:
     """Fetches the fastest lap time for a driver in a session via FastF1."""
     try:

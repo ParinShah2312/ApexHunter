@@ -49,31 +49,31 @@ def extract_stints(
         - lap_features: List[dict], lap-level aggregated features
     """
     stint_results = []
-    
+
     # Sort laps just in case
     driver_laps = driver_laps.sort_values("LapNumber")
-    
+
     for stint_num, stint_laps in driver_laps.groupby("Stint"):
         lap_feature_list = []
-        
+
         for _, lap in stint_laps.iterrows():
             start_time = lap["LapStartTime"]
             end_time = lap["Time"]
-            
+
             # Slice telemetry for this lap
             mask = (telemetry["SessionTime"] >= start_time) & (telemetry["SessionTime"] <= end_time)
             lap_tel = telemetry[mask]
-            
+
             if len(lap_tel) < 5:
                 continue
-                
+
             compound = str(lap["Compound"]).upper()
-            
+
             # Note: fastf1 TyreLife is a float, handle missing if any
             tyre_life = float(lap["TyreLife"]) if not pd.isna(lap["TyreLife"]) else float(lap["LapNumber"])
-            
+
             lap_time_secs = lap["LapTime"].total_seconds() if not pd.isna(lap["LapTime"]) else float('nan')
-            
+
             features = {
                 "mean_speed": float(lap_tel["Speed"].mean()),
                 "mean_throttle": float(lap_tel["Throttle"].mean()),
@@ -87,12 +87,12 @@ def extract_stints(
                 "lap_time_seconds": float(lap_time_secs),
             }
             lap_feature_list.append(features)
-            
+
         if len(lap_feature_list) < MIN_STINT_LAPS:
             continue
-            
+
         lap_features_df = pd.DataFrame(lap_feature_list)
-        
+
         # Detect cliff lap
         first_lap_speed = lap_features_df["mean_speed"].iloc[0]
         cliff_lap = None
@@ -100,7 +100,7 @@ def extract_stints(
             if lap_features_df["mean_speed"].iloc[i] < first_lap_speed - CLIFF_SPEED_DROP_KMH:
                 cliff_lap = i
                 break
-                
+
         # Build sliding window sequences
         sequences = []
         targets = []
@@ -109,7 +109,7 @@ def extract_stints(
             target = lap_features_df["mean_speed"].iloc[i + SEQUENCE_LENGTH]
             sequences.append(window)
             targets.append(float(target))
-            
+
         if len(sequences) > 0:
             stint_results.append({
                 "stint_index": int(stint_num) - 1, # Make 0-indexed to match old logic
@@ -119,7 +119,7 @@ def extract_stints(
                 "sequences": sequences,
                 "targets": targets,
             })
-            
+
     return stint_results
 
 
@@ -187,7 +187,7 @@ def build_training_dataset(
 
     all_sequences = []
     all_targets = []
-    
+
     cache_dir = sessions_dir.parent.parent / "cache"
     cache_dir.mkdir(exist_ok=True)
     fastf1.Cache.enable_cache(str(cache_dir))

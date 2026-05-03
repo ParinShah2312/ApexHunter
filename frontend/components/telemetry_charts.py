@@ -14,17 +14,20 @@ from plotly.subplots import make_subplots
 
 from components.data_loader import downsample
 
+
 def _get_time_col(df: pd.DataFrame) -> str:
     """Return the primary time column name."""
     if "SessionTime" in df.columns and not df["SessionTime"].isnull().all():
         return "SessionTime"
     return "Time"
 
+
 def _compute_brake_overlap(df: pd.DataFrame) -> float:
     """Return percentage of rows where Brake > 0 AND Throttle > 0."""
     if len(df) == 0:
         return 0.0
     return float(((df["Brake"] > 0) & (df["Throttle"] > 0)).sum() / len(df) * 100)
+
 
 def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
     """Render the three KPI metric cards row."""
@@ -47,6 +50,7 @@ def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
     with mc3:
         st.metric("Brake Overlap", f"{overlap_pct:.1f}%")
         st.caption("lower is better")
+
 
 def _build_telemetry_figure(
     df_chart: pd.DataFrame,
@@ -171,6 +175,7 @@ def _build_telemetry_figure(
 
     return fig
 
+
 def render_telemetry(
     df_driver: pd.DataFrame,
     driver_name: str,
@@ -190,7 +195,7 @@ def render_telemetry(
         return None
 
     scrub_val = st.session_state.get("scrub_seconds", 0.0)
-    
+
     # Render KPI Cards
     _render_metric_cards(df_driver, scrub_val)
 
@@ -261,4 +266,3 @@ def render_telemetry(
 
     hover_template = "Speed: %{y:.1f} km/h<extra></extra>"
     return (df_filtered, hover_template)
-
