@@ -12,7 +12,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from mistakes_io import load_and_validate, select_reference_driver, REQUIRED_COLUMNS
+from isolation_forest.mistakes_io import load_and_validate, select_reference_driver, REQUIRED_COLUMNS
 
 
 def _make_silent_logger():

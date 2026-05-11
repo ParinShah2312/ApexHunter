@@ -11,7 +11,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from mistakes_model import run_inference
+from isolation_forest.mistakes_model import run_inference
 
 
 class TestModelInference(unittest.TestCase):

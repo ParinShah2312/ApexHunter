@@ -9,7 +9,7 @@ import numpy as np
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from inference_geometry import get_closest_distance
+from cv.inference_geometry import get_closest_distance
 
 
 class TestGeometryDistance(unittest.TestCase):

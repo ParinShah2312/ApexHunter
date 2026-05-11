@@ -46,28 +46,28 @@ def get_closest_distance(
 
 def extract_inner_edge(contour: Any, turn_direction: str) -> Any:
     """Filter a curb contour to only include the track-side inner edge.
-    
+
     If it's a Right turn (curb on the right), the inner edge is the leftmost boundary (min X).
     If it's a Left turn (curb on the left), the inner edge is the rightmost boundary (max X).
-    
+
     Args:
         contour: The raw OpenCV contour.
         turn_direction: 'Left', 'Right', or '-'.
-        
+
     Returns:
         Filtered contour containing only the inner edge points.
     """
     if contour is None or len(contour) == 0 or turn_direction == "-":
         return contour
-        
+
     pts = np.squeeze(contour, axis=1) if contour.ndim == 3 else contour
     if pts.ndim == 1:
         pts = pts.reshape(1, 2)
-        
+
     # Group points by Y coordinate
     y_coords = np.unique(pts[:, 1])
     inner_edge_pts = []
-    
+
     for y in y_coords:
         x_vals = pts[pts[:, 1] == y][:, 0]
         if turn_direction == "Right":
@@ -76,7 +76,7 @@ def extract_inner_edge(contour: Any, turn_direction: str) -> Any:
         elif turn_direction == "Left":
             # Curb is on the left, track is on the right -> get max X
             inner_edge_pts.append([np.max(x_vals), y])
-            
+
     filtered_contour = np.array(inner_edge_pts, dtype=np.int32).reshape((-1, 1, 2))
     return filtered_contour
 
@@ -103,7 +103,7 @@ BAHRAIN_TURN_WINDOWS = [
 
 def get_turn_context(timestamp_sec: float) -> Tuple[str, str]:
     """Return the hardcoded turn direction and speed category for the current timestamp.
-    
+
     Returns:
         Tuple of (turn_direction, speed_category). Defaults to ('-', 'Medium') on straights.
     """
@@ -127,30 +127,30 @@ def classify_apex_status(
     """
     turn_dir, speed_cat = get_turn_context(timestamp_sec)
     in_turn = (turn_dir != "-")
-        
+
     if not in_turn:
         return "Straight", (200, 200, 200)
-        
+
     # If the distance is physically larger than half the screen, we have latched
     # onto the outer exit curb. Treat the apex curb as missing.
     if distance_px > 900:
         distance_px = float('inf')
-        
+
     if not has_curb or distance_px == float('inf'):
         # If the valid apex curb is physically off-screen, we cannot definitively judge distance.
         # We reserve 'Missing Apex' for when the curb is visible but the car is far away.
         return "Tracking", (200, 200, 200)
-        
+
     # Scale distance thresholds dynamically based on corner speed
     multiplier = 1.0
     if speed_cat == "Slow":
         multiplier = 0.75  # Stricter: car is moving slower, must hit tighter
     elif speed_cat == "Fast":
         multiplier = 1.35  # Forgiving: aerodynamic wide lines are acceptable
-        
+
     dynamic_hit_threshold = int(HIT_THRESHOLD * multiplier)
     dynamic_near_threshold = int(NEAR_THRESHOLD * multiplier)
-        
+
     if distance_px < dynamic_hit_threshold:
         return "Hitting Apex", (0, 255, 0)
     elif distance_px < dynamic_near_threshold:

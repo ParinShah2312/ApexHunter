@@ -19,7 +19,6 @@ import pandas as pd
 from utils import CACHE_DIR, CONFIG, DATA_LAKE_DIR, setup_logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-
 logger = setup_logger(__name__)
 
 SEASONS: List[int] = CONFIG.get("seasons", [2023, 2024])

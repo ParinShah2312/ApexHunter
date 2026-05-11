@@ -23,13 +23,13 @@ import streamlit as st
 
 from config import DRIVER_MAPPING
 
-# ── Backend script path injection for mongo_manager ──────────────────────────
+# ── Backend script path injection for mongo_manager ───────────────────────────
 _BACKEND_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "backend" / "scripts"
 if str(_BACKEND_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_SCRIPTS_DIR))
 
 try:
-    from mongo_manager import (  # type: ignore
+    from bigdata.mongo_manager import (  # type: ignore
         get_client, check_mongo_available,
         get_mistake_leaderboard, get_anomaly_score_distribution,
         get_session_summary, get_mistakes_by_driver,
@@ -50,8 +50,7 @@ from components.bigdata_charts import (
     build_algo_comparison_bar, build_tech_radar,
 )
 
-# ── Configuration ────────────────────────────────────────────────────────────
-
+# ── Configuration ─────────────────────────────────────────────────────────────
 HADOOP_CMD: str = "hadoop.cmd" if os.name == "nt" else "hadoop"
 HDFS_STATUS_LOG: Path = Path(DATA_LAKE_DIR) / "hdfs_status.json"
 SPARK_RUN_LOG: Path = Path(DATA_LAKE_DIR) / "spark_run_log.json"
@@ -59,9 +58,7 @@ MONGO_STATUS_LOG: Path = Path(DATA_LAKE_DIR) / "mongo_status.json"
 TELEMETRY_SAMPLE_SIZE: int = 50000
 
 
-# ── Data Loading Helpers ─────────────────────────────────────────────────────
-
-
+# ── Data Loading Helpers ──────────────────────────────────────────────────────
 def _load_json_log(path: Path) -> Optional[Dict[str, Any]]:
     """Load and parse a JSON log file, returning None on any failure.
 
@@ -157,9 +154,7 @@ def _fetch_anomaly_distribution() -> Dict[str, Any]:
         return {}
 
 
-# ── Section Renderers ────────────────────────────────────────────────────────
-
-
+# ── Section Renderers ─────────────────────────────────────────────────────────
 def _render_pipeline_banner() -> None:
     """Render the Technology Stack and Pipeline Architecture banner section."""
     st.subheader("🔬 Technology Stack & Pipeline Architecture")
@@ -481,9 +476,7 @@ def _render_mongo_section() -> None:
             st.warning(f"MongoDB unavailable: {e}. Start MongoDB and run mongo_manager.py --upload.")
 
 
-# ── Main Entry Point ────────────────────────────────────────────────────────
-
-
+# ── Main Entry Point ──────────────────────────────────────────────────────────
 def render_bigdata_tab(df_full: Optional[pd.DataFrame] = None) -> None:
     """Render the Big Data analytics tab in the Streamlit dashboard.
 

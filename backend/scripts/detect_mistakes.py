@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from mistakes_features import FEATURE_COLUMNS, engineer_features
-from mistakes_io import build_meta, load_and_validate, save_outputs, select_reference_driver
-from mistakes_model import CONTAMINATION_VALUES, run_grid_search, run_inference, train_final_model
+from isolation_forest.mistakes_features import FEATURE_COLUMNS, engineer_features
+from isolation_forest.mistakes_io import build_meta, load_and_validate, save_outputs, select_reference_driver
+from isolation_forest.mistakes_model import CONTAMINATION_VALUES, run_grid_search, run_inference, train_final_model
 from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)

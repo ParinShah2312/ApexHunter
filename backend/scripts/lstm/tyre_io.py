@@ -96,7 +96,7 @@ def load_model_artifacts(
     logger.info(f"Loaded config: {config_path}")
 
     # Reconstruct model
-    from tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
+    from lstm.tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
 
     model = TyreCliffLSTM(
         INPUT_SIZE, config["hidden_size"], NUM_LAYERS, DROPOUT_RATE

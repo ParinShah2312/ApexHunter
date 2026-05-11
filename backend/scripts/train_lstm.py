@@ -19,9 +19,9 @@ from pathlib import Path
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-from tyre_data import SEQUENCE_LENGTH, build_training_dataset
-from tyre_io import log_dataset_stats, log_training_complete, log_training_start, save_model_artifacts
-from tyre_model import (
+from lstm.tyre_data import SEQUENCE_LENGTH, build_training_dataset
+from lstm.tyre_io import log_dataset_stats, log_training_complete, log_training_start, save_model_artifacts
+from lstm.tyre_model import (
     DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS,
     evaluate_on_test, run_hyperparameter_search, train_final_model,
 )

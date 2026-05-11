@@ -7,7 +7,7 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from inference_geometry import (
+from cv.inference_geometry import (
     compute_wheel_positions, LEFT_WHEEL_X_PCT, RIGHT_WHEEL_X_PCT, WHEEL_Y_PCT,
 )
 

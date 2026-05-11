@@ -12,14 +12,14 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from racing_line_grid import GridNode
-from racing_line_io import (
+from racing_line.racing_line_grid import GridNode
+from racing_line.racing_line_io import (
     build_output,
     compute_time_saved,
     load_and_validate,
     save_output,
 )
-from racing_line_search import SearchResult
+from racing_line.racing_line_search import SearchResult
 
 
 class TestRacingLineIO(unittest.TestCase):

@@ -24,8 +24,7 @@ from typing import Dict, List, Optional, Tuple
 
 from utils import DATA_LAKE_DIR, IST, setup_logger
 
-# ── Configuration ────────────────────────────────────────────────────────────
-
+# ── Configuration ─────────────────────────────────────────────────────────────
 HADOOP_CMD: str = "hadoop.cmd" if os.name == "nt" else "hadoop"
 HDFS_ROOT: str = "/apexhunter"
 HDFS_RAW_DIR: str = f"{HDFS_ROOT}/season_data"
@@ -37,9 +36,7 @@ STATUS_LOG_PATH: Path = DATA_LAKE_DIR / "hdfs_status.json"
 logger = setup_logger(__name__)
 
 
-# ── Connection Helpers ───────────────────────────────────────────────────────
-
-
+# ── Connection Helpers ────────────────────────────────────────────────────────
 def check_hdfs_available() -> bool:
     """Check whether HDFS is reachable by listing the root directory.
 
@@ -77,9 +74,7 @@ def _run_hadoop(hadoop_args: List[str]) -> subprocess.CompletedProcess:
     )
 
 
-# ── Directory Management ────────────────────────────────────────────────────
-
-
+# ── Directory Management ──────────────────────────────────────────────────────
 def ensure_hdfs_dirs(base_path: str, subdirs: List[str]) -> None:
     """Create HDFS directories if they do not already exist.
 
@@ -98,9 +93,7 @@ def ensure_hdfs_dirs(base_path: str, subdirs: List[str]) -> None:
             _run_hadoop(["fs", "-mkdir", "-p", hdfs_path])
 
 
-# ── Upload Logic ─────────────────────────────────────────────────────────────
-
-
+# ── Upload Logic ──────────────────────────────────────────────────────────────
 def _file_exists_in_hdfs(hdfs_file_path: str) -> bool:
     """Check whether a specific file exists in HDFS.
 
@@ -163,9 +156,7 @@ def upload_directory(local_dir: Path, hdfs_dir: str, pattern: str, force: bool) 
     return stats
 
 
-# ── Storage Statistics ───────────────────────────────────────────────────────
-
-
+# ── Storage Statistics ────────────────────────────────────────────────────────
 def get_hdfs_dir_stats(hdfs_dir: str) -> Dict[str, object]:
     """Retrieve file listing and total size for an HDFS directory.
 
@@ -214,6 +205,7 @@ def get_hdfs_dir_stats(hdfs_dir: str) -> Dict[str, object]:
         except (ValueError, IndexError):
             pass
 
+
     return stats
 
 
@@ -249,9 +241,7 @@ def get_all_hdfs_stats() -> Tuple[Dict[str, Dict], Dict[str, object]]:
     return dir_stats, summary
 
 
-# ── Verification ─────────────────────────────────────────────────────────────
-
-
+# ── Verification ──────────────────────────────────────────────────────────────
 def verify_uploads(local_dir: Path, hdfs_dir: str, pattern: str) -> Dict[str, object]:
     """Compare local files against HDFS to find any missing uploads.
 
@@ -288,9 +278,7 @@ def verify_uploads(local_dir: Path, hdfs_dir: str, pattern: str) -> Dict[str, ob
     return res
 
 
-# ── Status Log ───────────────────────────────────────────────────────────────
-
-
+# ── Status Log ────────────────────────────────────────────────────────────────
 def write_status_log(
     hdfs_available: bool,
     dir_stats: Dict[str, Dict],
@@ -334,9 +322,7 @@ def write_status_log(
         logger.error(f"Failed to write status log: {e}")
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     """Parse CLI arguments and execute the appropriate HDFS pipeline actions."""
     parser = argparse.ArgumentParser(description="Manage HDFS data for ApexHunter")

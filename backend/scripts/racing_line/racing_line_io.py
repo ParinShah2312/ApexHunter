@@ -11,8 +11,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from racing_line_grid import GridNode
-from racing_line_search import SearchResult
+from racing_line.racing_line_grid import GridNode
+from racing_line.racing_line_search import SearchResult
 from utils import IST
 
 REQUIRED_COLUMNS: List[str] = ["Driver", "X", "Y", "Speed", "Brake", "SessionTime"]

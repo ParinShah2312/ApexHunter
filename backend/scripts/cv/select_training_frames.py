@@ -24,7 +24,6 @@ from utils import CONFIG, DATA_LAKE_DIR, setup_logger
 logger = setup_logger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-
 FRAMES_ROOT = DATA_LAKE_DIR / "cv_frames"
 OUTPUT_DIR = DATA_LAKE_DIR / "cv_dataset" / "upload_to_roboflow"
 FRAMES_PER_VIDEO = CONFIG.get("cv_frames", {}).get("frames_per_video", 11)  # ~11 frames × 46 videos ≈ 506 frames total
@@ -33,8 +32,6 @@ SEASONS = CONFIG.get("seasons", ["2023", "2024"])
 random.seed(42)  # Reproducible selection
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-
-
 def select_frames() -> None:
     logger.info("======================================================")
     logger.info("   ApexHunter - Training Frame Selector")

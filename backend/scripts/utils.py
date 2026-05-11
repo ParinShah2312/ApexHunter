@@ -7,11 +7,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
-
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_LAKE_DIR = PROJECT_ROOT / "data_lake"
 CACHE_DIR = PROJECT_ROOT / "cache"
@@ -25,7 +23,6 @@ except Exception as e:
     CONFIG = {}
 
 # ── Directory Management ──────────────────────────────────────────────────────
-
 DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 

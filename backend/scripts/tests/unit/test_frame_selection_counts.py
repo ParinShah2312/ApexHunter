@@ -9,7 +9,7 @@ from unittest.mock import patch
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import select_training_frames
+from cv import select_training_frames
 
 
 class TestFrameSelectionCounts(unittest.TestCase):

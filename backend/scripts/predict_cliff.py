@@ -19,9 +19,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from tyre_data import LAP_FEATURES, extract_stints
-from tyre_io import build_prediction_output, load_model_artifacts, log_prediction_complete, save_prediction
-from tyre_model import INPUT_SIZE, monte_carlo_predict, predict_single_stint
+from lstm.tyre_data import LAP_FEATURES, extract_stints
+from lstm.tyre_io import build_prediction_output, load_model_artifacts, log_prediction_complete, save_prediction
+from lstm.tyre_model import INPUT_SIZE, monte_carlo_predict, predict_single_stint
 from utils import DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
 
 logger = setup_logger(__name__)

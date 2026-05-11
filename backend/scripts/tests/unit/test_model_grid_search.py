@@ -34,72 +34,72 @@ class TestGridSearch(unittest.TestCase):
         self.logger = _make_silent_logger()
         self.X = np.random.rand(100, 7).astype("float32")
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_tries_all_contaminations(self, MockIF):
         instance = _make_mock_model(n=20)
         MockIF.return_value = instance
-        from mistakes_model import run_grid_search, CONTAMINATION_VALUES, N_FOLDS
+        from isolation_forest.mistakes_model import run_grid_search, CONTAMINATION_VALUES, N_FOLDS
         best_c, scores, best_score = run_grid_search(self.X, self.logger)
         expected_calls = len(CONTAMINATION_VALUES) * N_FOLDS
         self.assertEqual(instance.fit.call_count, expected_calls)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_returns_tuple_of_three(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search
+        from isolation_forest.mistakes_model import run_grid_search
         result = run_grid_search(self.X, self.logger)
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 3)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_best_contamination_is_from_list(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search, CONTAMINATION_VALUES
+        from isolation_forest.mistakes_model import run_grid_search, CONTAMINATION_VALUES
         best_c, _, _ = run_grid_search(self.X, self.logger)
         self.assertIn(best_c, CONTAMINATION_VALUES)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_cv_scores_dict_length(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search, CONTAMINATION_VALUES
+        from isolation_forest.mistakes_model import run_grid_search, CONTAMINATION_VALUES
         _, scores, _ = run_grid_search(self.X, self.logger)
         self.assertEqual(len(scores), len(CONTAMINATION_VALUES))
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_cv_scores_dict_keys_are_strings(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search
+        from isolation_forest.mistakes_model import run_grid_search
         _, scores, _ = run_grid_search(self.X, self.logger)
         for key in scores:
             self.assertIsInstance(key, str)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_best_score_consistent(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search
+        from isolation_forest.mistakes_model import run_grid_search
         best_c, scores, best_score = run_grid_search(self.X, self.logger)
         self.assertAlmostEqual(best_score, scores[str(best_c)], places=5)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_uses_correct_n_estimators(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search, N_ESTIMATORS
+        from isolation_forest.mistakes_model import run_grid_search, N_ESTIMATORS
         run_grid_search(self.X, self.logger)
         for c in MockIF.call_args_list:
             self.assertEqual(c.kwargs.get("n_estimators"), N_ESTIMATORS)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_uses_correct_random_state(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search, RANDOM_STATE
+        from isolation_forest.mistakes_model import run_grid_search, RANDOM_STATE
         run_grid_search(self.X, self.logger)
         for c in MockIF.call_args_list:
             self.assertEqual(c.kwargs.get("random_state"), RANDOM_STATE)
 
-    @patch("mistakes_model.IsolationForest")
+    @patch("isolation_forest.mistakes_model.IsolationForest")
     def test_grid_search_logs_each_contamination(self, MockIF):
         MockIF.return_value = _make_mock_model(n=20)
-        from mistakes_model import run_grid_search, CONTAMINATION_VALUES
+        from isolation_forest.mistakes_model import run_grid_search, CONTAMINATION_VALUES
         handler = logging.handlers.MemoryHandler(capacity=100)
         self.logger.addHandler(handler)
         run_grid_search(self.X, self.logger)

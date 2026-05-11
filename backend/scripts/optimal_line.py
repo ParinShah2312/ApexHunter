@@ -15,9 +15,9 @@ import gc
 import sys
 from pathlib import Path
 
-from racing_line_grid import DEFAULT_GRID_RESOLUTION, build_adjacency, build_grid, compute_coordinate_scale, find_start_end_nodes, get_nearest_node, get_node_for_row
-from racing_line_io import build_output, compute_time_saved, fetch_fastest_lap_bounds, load_and_validate, log_racing_line_complete, save_output
-from racing_line_search import SearchResult, astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, run_full_lap
+from racing_line.racing_line_grid import DEFAULT_GRID_RESOLUTION, build_adjacency, build_grid, compute_coordinate_scale, find_start_end_nodes, get_nearest_node, get_node_for_row
+from racing_line.racing_line_io import build_output, compute_time_saved, fetch_fastest_lap_bounds, load_and_validate, log_racing_line_complete, save_output
+from racing_line.racing_line_search import SearchResult, astar, bfs, compute_deviation_per_corner, compute_path_cost_weighted, dijkstra, run_full_lap
 from utils import DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)

@@ -76,6 +76,7 @@ def _build_session_options(
                 return int(x.split("Round ")[1].split(":")[0])
         except (ValueError, IndexError):
             pass
+
         return 999
 
     session_options.sort(key=_round_key)

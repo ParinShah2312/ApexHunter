@@ -21,7 +21,6 @@ import pandas as pd
 from utils import DATA_LAKE_DIR, setup_logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-
 logger = setup_logger(__name__)
 
 RAW_DATA_DIR = DATA_LAKE_DIR / "season_data"

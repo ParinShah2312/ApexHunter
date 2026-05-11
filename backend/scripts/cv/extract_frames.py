@@ -28,15 +28,12 @@ except ImportError:
     sys.exit(1)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-
 VIDEO_ROOT = DATA_LAKE_DIR / "edited_videos"
 OUTPUT_ROOT = DATA_LAKE_DIR / "cv_frames"
 TARGET_FPS = CONFIG.get("cv_frames", {}).get("target_fps", 5)  # Extract 5 frames per second
 SEASONS = CONFIG.get("seasons", ["2023", "2024"])
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-
-
 def extract_frames_from_video(video_path: Path, output_dir: Path) -> int:
     """Extract frames at TARGET_FPS from a single video."""
 

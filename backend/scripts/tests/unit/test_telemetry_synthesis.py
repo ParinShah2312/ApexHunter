@@ -12,7 +12,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from clean_telemetry import clean_telemetry_file, get_directory_size
+from etl.clean_telemetry import clean_telemetry_file, get_directory_size
 
 
 def _make_base_df(n=80):

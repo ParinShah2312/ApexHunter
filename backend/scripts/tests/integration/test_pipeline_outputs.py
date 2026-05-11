@@ -15,7 +15,7 @@ sys.path.insert(0, str(TESTS_DIR))
 RUN_SLOW = os.environ.get("APEXHUNTER_RUN_SLOW", "0") == "1"
 slow_test = unittest.skipUnless(RUN_SLOW, "Skipped: set APEXHUNTER_RUN_SLOW=1 to run")
 
-from mistakes_features import FEATURE_COLUMNS
+from isolation_forest.mistakes_features import FEATURE_COLUMNS
 
 
 @slow_test

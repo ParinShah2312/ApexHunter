@@ -13,8 +13,8 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from mistakes_io import save_outputs, build_meta
-from mistakes_features import FEATURE_COLUMNS
+from isolation_forest.mistakes_io import save_outputs, build_meta
+from isolation_forest.mistakes_features import FEATURE_COLUMNS
 
 
 def _make_silent_logger():

@@ -30,8 +30,7 @@ from pymongo.errors import ConnectionFailure
 
 from utils import DATA_LAKE_DIR, IST, setup_logger
 
-# ── Configuration ────────────────────────────────────────────────────────────
-
+# ── Configuration ─────────────────────────────────────────────────────────────
 MONGO_URI: str = "mongodb://localhost:27017/"
 MONGO_DB_NAME: str = "apexhunter"
 MONGO_TIMEOUT_MS: int = 3000
@@ -44,9 +43,7 @@ SESSION_FILE_PATTERN: str = r"(\d{4})_(\d+)_([a-zA-Z0-9]+)\.parquet"
 logger = setup_logger(__name__)
 
 
-# ── Connection Helpers ───────────────────────────────────────────────────────
-
-
+# ── Connection Helpers ────────────────────────────────────────────────────────
 def get_client() -> MongoClient:
     """Create a MongoClient, ping the server, and return it.
 
@@ -97,9 +94,7 @@ def _safe_float(val: Any) -> float:
         return 0.0
 
 
-# ── Upload Logic ─────────────────────────────────────────────────────────────
-
-
+# ── Upload Logic ──────────────────────────────────────────────────────────────
 def upload_mistake_outputs(force: bool = False) -> Dict[str, int]:
     """Upload mistake annotation parquets and their metadata to MongoDB.
 
@@ -254,6 +249,7 @@ def _get_hdfs_dir_size(hdfs_path: str) -> int:
             return int(result.stdout.split()[0])
         except (ValueError, IndexError):
             pass
+
     return 0
 
 
@@ -363,9 +359,7 @@ def upload_session_metadata(use_hdfs: bool = False) -> Dict[str, int]:
         return stats
 
 
-# ── Query Functions ──────────────────────────────────────────────────────────
-
-
+# ── Query Functions ───────────────────────────────────────────────────────────
 def get_mistake_leaderboard(db: Any) -> List[Dict[str, Any]]:
     """Return all mistake annotations sorted by mistake rate descending.
 
@@ -457,9 +451,7 @@ def get_mistakes_by_driver(db: Any, driver: str) -> List[Dict[str, Any]]:
     return list(cursor)
 
 
-# ── Status Log ───────────────────────────────────────────────────────────────
-
-
+# ── Status Log ────────────────────────────────────────────────────────────────
 def write_status_log(mongo_available: bool, upload_summary: Optional[Dict] = None) -> None:
     """Write the MongoDB status JSON log consumed by the Streamlit Big Data tab.
 
@@ -514,9 +506,7 @@ def write_status_log(mongo_available: bool, upload_summary: Optional[Dict] = Non
         logger.error(f"Failed to write MongoDB status log: {e}")
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     """Parse CLI arguments and execute the appropriate MongoDB pipeline actions."""
     parser = argparse.ArgumentParser(description="MongoDB Manager for ApexHunter")

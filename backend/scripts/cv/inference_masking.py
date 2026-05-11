@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from inference_geometry import extract_inner_edge, get_closest_distance
+from cv.inference_geometry import extract_inner_edge, get_closest_distance
 
 
 def process_masks(
@@ -79,22 +79,22 @@ def process_masks(
                                 if expected_turn == "Left" and cx_temp > center_x + 100:
                                     continue
                         valid_contours.append(c)
-                        
+
                     if valid_contours:
                         largest_contour = max(valid_contours, key=cv2.contourArea)
                         M = cv2.moments(largest_contour)
                         if M['m00'] != 0:
                             cx = int(M['m10'] / M['m00'])
-        
+
                             # Use hardcoded expected_turn if available, otherwise fallback to dynamic
                             is_right = (cx > center_x) if expected_turn == "-" else (expected_turn == "Right")
-                            
+
                             # Apply Track Limit Extraction (Isolate the asphalt-side inner edge)
                             turn_direction_local = "Right" if is_right else "Left"
                             active_turn_dir = turn_direction_local if expected_turn != "-" else "-"
-                            
+
                             inner_edge_contour = extract_inner_edge(largest_contour, turn_direction_local)
-                            
+
                             if is_right:
                                 turn_direction = active_turn_dir
                                 dist, pt = get_closest_distance(right_wheel, inner_edge_contour)

@@ -441,7 +441,7 @@ def predict_single_stint(
     y_mean: float, y_std: float, seq_len: int
 ) -> dict:
     """Predict cliff for a single stint and return the result dictionary."""
-    from tyre_data import LAP_FEATURES
+    from lstm.tyre_data import LAP_FEATURES
     stint_index = stint_data["stint_index"]
     lap_features = pd.DataFrame(stint_data["lap_features"])
     actual_speeds = lap_features["mean_speed"].tolist()

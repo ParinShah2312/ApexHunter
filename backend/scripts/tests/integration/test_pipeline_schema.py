@@ -17,7 +17,7 @@ sys.path.insert(0, str(TESTS_DIR))
 RUN_SLOW = os.environ.get("APEXHUNTER_RUN_SLOW", "0") == "1"
 slow_test = unittest.skipUnless(RUN_SLOW, "Skipped: set APEXHUNTER_RUN_SLOW=1 to run")
 
-from mistakes_features import FEATURE_COLUMNS
+from isolation_forest.mistakes_features import FEATURE_COLUMNS
 
 
 @slow_test
@@ -53,8 +53,8 @@ class TestPipelineSchema(unittest.TestCase):
     def test_row_count_unchanged(self):
         self.assertEqual(len(self.df), self.fixture["n_rows"])
 
-    def test_meta_json_all_keys_present(self):
-        for key in ["session_file", "driver", "reference_driver", "reference_file",
+    def test_meta_has_all_keys(self):
+        for key in ["session", "driver", "reference_driver", "model_type",
                      "best_contamination", "cv_scores", "best_cv_score", "total_rows",
                      "total_mistakes", "mistake_rate_pct", "n_estimators",
                      "feature_columns", "timestamp"]:

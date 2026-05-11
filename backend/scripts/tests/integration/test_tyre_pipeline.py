@@ -83,9 +83,9 @@ def run_full_pipeline_once() -> dict:
     lg.handlers = [logging.NullHandler()]
     lg.setLevel(logging.CRITICAL)
 
-    from tyre_data import build_training_dataset, SEQUENCE_LENGTH, extract_stints
-    from tyre_model import INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
-    from tyre_io import save_model_artifacts, load_model_artifacts, build_prediction_output, save_prediction
+    from lstm.tyre_data import build_training_dataset, SEQUENCE_LENGTH, extract_stints
+    from lstm.tyre_model import INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
+    from lstm.tyre_io import save_model_artifacts, load_model_artifacts, build_prediction_output, save_prediction
 
     # ── MOCK FASTF1 LAPS ──
     # Create fake laps that align with the synthetic SessionTime (0-180s, 300-480s)
@@ -131,7 +131,7 @@ def run_full_pipeline_once() -> dict:
     y_train, y_test = y_scaled[:-test_n], y_scaled[-test_n:]
 
     # Use only 2 configs for speed
-    from tyre_model import train_one_config
+    from lstm.tyre_model import train_one_config
     import gc
 
     configs = [
@@ -139,7 +139,7 @@ def run_full_pipeline_once() -> dict:
         {"hidden_size": 64, "learning_rate": 0.001},
     ]
 
-    from tyre_model import VAL_SPLIT
+    from lstm.tyre_model import VAL_SPLIT
     split = int(len(X_train) * (1 - VAL_SPLIT))
     Xtr, Xv = X_train[:split], X_train[split:]
     ytr, yv = y_train[:split], y_train[split:]
@@ -162,7 +162,7 @@ def run_full_pipeline_once() -> dict:
         gc.collect()
 
     # Evaluate
-    from tyre_model import evaluate_on_test
+    from lstm.tyre_model import evaluate_on_test
     mae = evaluate_on_test(best_model, X_test, y_test, y_mean, y_std)
 
     config = {
@@ -181,8 +181,8 @@ def run_full_pipeline_once() -> dict:
     save_model_artifacts(best_model, scaler, config, models_dir, lg)
 
     # Predict
-    from tyre_data import CLIFF_SPEED_DROP_KMH
-    from tyre_model import monte_carlo_predict
+    from lstm.tyre_data import CLIFF_SPEED_DROP_KMH
+    from lstm.tyre_model import monte_carlo_predict
 
     model, scaler_loaded, config_loaded = load_model_artifacts(models_dir, lg)
 
@@ -201,7 +201,7 @@ def run_full_pipeline_once() -> dict:
         actual_speeds = lap_features["mean_speed"].tolist()
 
         # We need to build padded sequences for the test
-        from tyre_data import LAP_FEATURES
+        from lstm.tyre_data import LAP_FEATURES
         features_np = lap_features[LAP_FEATURES].values.copy()
 
         if len(features_np) > 1:

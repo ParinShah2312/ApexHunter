@@ -11,7 +11,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from racing_line_grid import (
+from racing_line.racing_line_grid import (
     build_grid,
     compute_node_weight,
     build_adjacency,

@@ -14,7 +14,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from clean_telemetry import clean_telemetry_file
+from etl.clean_telemetry import clean_telemetry_file
 
 
 class TestTelemetryCleaning(unittest.TestCase):

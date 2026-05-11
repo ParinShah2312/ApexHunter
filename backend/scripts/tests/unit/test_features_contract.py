@@ -10,7 +10,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from mistakes_features import FEATURE_COLUMNS, engineer_features
+from isolation_forest.mistakes_features import FEATURE_COLUMNS, engineer_features
 
 
 def _make_df(n, **overrides):

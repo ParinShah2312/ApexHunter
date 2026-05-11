@@ -28,8 +28,7 @@ from pyspark.sql.types import FloatType
 
 from utils import DATA_LAKE_DIR, IST, setup_logger
 
-# ── Configuration ────────────────────────────────────────────────────────────
-
+# ── Configuration ─────────────────────────────────────────────────────────────
 HADOOP_CMD: str = "hadoop.cmd" if os.name == "nt" else "hadoop"
 SPARK_APP_NAME: str = "ApexHunter-ETL"
 SPARK_DRIVER_MEMORY: str = "4g"
@@ -41,9 +40,7 @@ BYTES_PER_MB: int = 1024 * 1024
 logger = setup_logger(__name__)
 
 
-# ── ETL Pipeline ─────────────────────────────────────────────────────────────
-
-
+# ── ETL Pipeline ──────────────────────────────────────────────────────────────
 def _create_spark_session() -> SparkSession:
     """Build and return a configured SparkSession for the ETL pipeline.
 
@@ -63,9 +60,7 @@ def _create_spark_session() -> SparkSession:
     return spark
 
 
-# ── Status Log ───────────────────────────────────────────────────────────────
-
-
+# ── Status Log ────────────────────────────────────────────────────────────────
 def write_run_log(log_data: Dict[str, Any]) -> None:
     """Write the Spark ETL run log JSON consumed by the Streamlit Big Data tab.
 
@@ -81,9 +76,7 @@ def write_run_log(log_data: Dict[str, Any]) -> None:
         logger.error(f"Failed to write Spark run log: {e}")
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     """Parse CLI arguments and execute the Spark ETL cleaning pipeline."""
     parser = argparse.ArgumentParser(description="Spark ETL for ApexHunter")
@@ -217,6 +210,7 @@ def main() -> None:
                     output_size_mb = round(int(bytes_str) / BYTES_PER_MB, 2)
                 except (ValueError, IndexError):
                     pass
+
         else:
             out_dir = Path(output_path)
             if out_dir.exists():

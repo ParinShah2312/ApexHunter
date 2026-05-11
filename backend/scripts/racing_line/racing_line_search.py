@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from racing_line_grid import GridNode
+from racing_line.racing_line_grid import GridNode
 
 
 @dataclass

@@ -120,7 +120,7 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
 
         st.markdown("---")
         st.subheader("📋 Turn-by-Turn Report Card")
-        
+
         BAHRAIN_TURN_WINDOWS = [
             (13.0, 16.0, "Right", "Slow", "Turn 1"),
             (17.0, 19.0, "Left", "Medium", "Turn 2"),
@@ -144,10 +144,10 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
             # Filter df_cv for this turn window
             df_turn = df_cv[(df_cv['timestamp_sec'] >= start_t) & (df_cv['timestamp_sec'] <= end_t)]
             df_turn_valid = df_turn.dropna(subset=['distance_cm'])
-            
+
             if not df_turn_valid.empty:
                 min_dist = df_turn_valid['distance_cm'].min()
-                
+
                 # Evaluate corner success by their closest point to the apex,
                 # not the average of the whole 3-second corner entry/exit
                 if min_dist <= 30.0:

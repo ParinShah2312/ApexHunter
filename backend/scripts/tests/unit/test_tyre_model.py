@@ -13,8 +13,8 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import torch
 import torch.nn as nn
 
-from tyre_data import SEQUENCE_LENGTH
-from tyre_model import (
+from lstm.tyre_data import SEQUENCE_LENGTH
+from lstm.tyre_model import (
     DROPOUT_RATE,
     INPUT_SIZE,
     NUM_LAYERS,

@@ -8,8 +8,8 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from racing_line_grid import GridNode
-from racing_line_search import (
+from racing_line.racing_line_grid import GridNode
+from racing_line.racing_line_search import (
     SearchResult,
     astar,
     bfs,

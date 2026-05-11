@@ -11,7 +11,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from tyre_data import (
+from lstm.tyre_data import (
     LAP_FEATURES,
     SEQUENCE_LENGTH,
     extract_stints,
@@ -88,7 +88,7 @@ class TestExtractStintsEdgeCases(unittest.TestCase):
 
     def test_insufficient_laps_returns_empty(self) -> None:
         """extract_stints should return [] when stint has fewer laps than MIN_STINT_LAPS."""
-        from tyre_data import MIN_STINT_LAPS
+        from lstm.tyre_data import MIN_STINT_LAPS
         # Create 1 lap (below threshold)
         driver_laps = pd.DataFrame({
             "LapNumber": [1],

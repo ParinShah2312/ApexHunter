@@ -10,8 +10,8 @@ from typing import List, Tuple
 
 import pandas as pd
 
-from mistakes_features import FEATURE_COLUMNS
-from mistakes_model import N_ESTIMATORS
+from isolation_forest.mistakes_features import FEATURE_COLUMNS
+from isolation_forest.mistakes_model import N_ESTIMATORS
 from utils import IST
 
 # ── Required columns for session parquet files ────────────────────────────────

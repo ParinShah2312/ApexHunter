@@ -118,7 +118,7 @@ st.markdown(_DARK_THEME_CSS, unsafe_allow_html=True)
 
 import streamlit.components.v1 as components
 
-# ── Disable typing in selectboxes (JS injection) ─────────────────────────────
+# ── Disable typing in selectboxes (JS injection) ──────────────────────────────
 components.html(
     """
     <script>
@@ -171,16 +171,16 @@ from components.data_loader import load_mistake_data, load_mistake_meta, load_ra
 from components.racing_line import render_racing_line
 from components.bigdata_tab import render_bigdata_tab
 
-# ── Step 1: Sidebar ──────────────────────────────────────────────────────────
+# ── Step 1: Sidebar ───────────────────────────────────────────────────────────
 sel = render_sidebar()
 
-# ── Step 2: Load AI data ─────────────────────────────────────────────────────
+# ── Step 2: Load AI data ──────────────────────────────────────────────────────
 df_mistakes = load_mistake_data(sel.mistake_parquet_path)
 meta = load_mistake_meta(sel.mistake_meta_path)
 racing_line_data = load_racing_line(sel.racing_line_path)
 tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
-# ── Step 3: Header bar ───────────────────────────────────────────────────────
+# ── Step 3: Header bar ────────────────────────────────────────────────────────
 render_header_bar(sel, meta)
 
 # ── Step 4: Tabs ──────────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🗄️ Big Data"
 ])
 
-# ── Tab 1: Race Intelligence ─────────────────────────────────────────────────
+# ── Tab 1: Race Intelligence ──────────────────────────────────────────────────
 with tab1:
     # ── Master scrubber at the TOP of Race Intelligence ────────────────────
     st.markdown("**⏱ Session Time — Master Scrubber**")
@@ -225,7 +225,7 @@ with tab1:
         label_visibility="collapsed",
         step=datetime.timedelta(milliseconds=100)
     )
-    
+
     # Sync back to scrub_seconds so the rest of the code works
     st.session_state["scrub_seconds"] = (selected_dt - base_date).total_seconds()
 
@@ -259,7 +259,7 @@ with tab1:
             show_ghost=False
         )
 
-# ── Tab 2: Telemetry ─────────────────────────────────────────────────────────
+# ── Tab 2: Telemetry ──────────────────────────────────────────────────────────
 with tab2:
     result = render_telemetry(
         df_driver=sel.df_driver,
@@ -269,7 +269,7 @@ with tab2:
         compare_number=sel.compare_driver_number,
     )
 
-# ── Tab 3: AI Analysis ───────────────────────────────────────────────────────
+# ── Tab 3: AI Analysis ────────────────────────────────────────────────────────
 with tab3:
     render_ai_analysis(
         df_mistakes=df_mistakes,

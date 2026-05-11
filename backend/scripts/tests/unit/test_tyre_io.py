@@ -16,8 +16,8 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from sklearn.preprocessing import StandardScaler
 
-from tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
-from tyre_io import (
+from lstm.tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
+from lstm.tyre_io import (
     build_prediction_output,
     load_model_artifacts,
     save_model_artifacts,
