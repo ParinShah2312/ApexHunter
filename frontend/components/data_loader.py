@@ -94,16 +94,23 @@ def load_cv_metrics(filepath: str) -> Optional[pd.DataFrame]:
     """
     if not Path(filepath).exists():
         return None
-    df = pd.read_csv(filepath)
+    try:
+        df = pd.read_csv(filepath)
+    except pd.errors.EmptyDataError:
+        return None
 
     # Clean has_curb: convert "True"/"False" strings to bool
     if "has_curb" in df.columns:
         df["has_curb"] = df["has_curb"].astype(str).str.strip().str.lower() == "true"
 
-    # Clean distance_px: extract integer from "123px" strings
+    # Backwards compatibility for older CSVs that still use distance_px
     if "distance_px" in df.columns:
-        df["distance_px"] = (
-            df["distance_px"]
+        df.rename(columns={"distance_px": "distance_cm"}, inplace=True)
+
+    # Clean distance_cm: extract integer from "123cm" or "123px" strings
+    if "distance_cm" in df.columns:
+        df["distance_cm"] = (
+            df["distance_cm"]
             .astype(str)
             .str.extract(r"(\d+)", expand=False)
             .astype(float)

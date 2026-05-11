@@ -16,8 +16,8 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from inference_geometry import classify_apex_status, compute_wheel_positions
-from inference_hud import draw_hud
+from inference_geometry import classify_apex_status, compute_wheel_positions, get_turn_context
+from inference_hud import HUDStateTracker, draw_hud
 from inference_io import create_csv_writer, create_video_writer, open_video, write_csv_row
 from inference_masking import process_masks
 from utils import CONFIG, DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
@@ -57,16 +57,28 @@ def process_video(input_video_path: Path, force: bool = False) -> None:
     csv_fh, csv_w = create_csv_writer(csv_out)
     lw, rw = compute_wheel_positions(w, h)
     cx = w // 2
+    tracker = HUDStateTracker(alpha=0.15)
+    
     for idx in tqdm(range(total), desc="Processing", unit="frame"):
         ret, frame = cap.read()
         if not ret:
             break
+            
+        timestamp_sec = float(idx) / float(fps) if fps > 0 else 0.0
+        expected_turn, speed_cat = get_turn_context(timestamp_sec)
+        
         res = model.predict(frame, conf=0.25, verbose=False)[0]
-        hud, dist, cp, dw, curb, turn = process_masks(res, frame, lw, rw, cx)
-        status, color = classify_apex_status(dist, curb)
-        ds = "N/A" if not curb or dist == float('inf') else f"{int(dist)}px"
+        hud, dist, cp, dw, curb, turn = process_masks(res, frame, lw, rw, cx, expected_turn, speed_cat)
+        
+        # Phase 1: Apply Temporal Smoothing to visual and data elements
+        cp, dist = tracker.update(cp, dist, curb)
+        
+        status, color = classify_apex_status(dist, curb, timestamp_sec)
+            
+        PIXELS_TO_CM = 0.155
+        ds = "N/A" if not curb or dist == float('inf') else f"{int(dist * PIXELS_TO_CM)}cm"
         write_csv_row(csv_w, idx, fps, ds, status, curb)
-        out.write(draw_hud(frame, hud, lw, rw, cp, dw, curb, status, color, ds, turn, ALPHA))
+        out.write(draw_hud(frame, hud, lw, rw, cp, dw, curb, status, color, ds, turn, ALPHA, idx))
     cap.release(); out.release(); csv_fh.close()
     logger.info(f"Done — Video: {vid_out.resolve()}, CSV: {csv_out.resolve()}")
 

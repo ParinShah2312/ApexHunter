@@ -63,7 +63,7 @@ def create_csv_writer(csv_path: Path) -> Tuple[Any, Any]:
     """
     file_handle = open(csv_path, mode='w', newline='')
     writer = csv.writer(file_handle)
-    writer.writerow(['frame_number', 'timestamp_sec', 'distance_px', 'status', 'has_curb'])
+    writer.writerow(['frame_number', 'timestamp_sec', 'distance_cm', 'status', 'has_curb'])
     return file_handle, writer
 
 

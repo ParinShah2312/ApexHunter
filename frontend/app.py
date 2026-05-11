@@ -115,6 +115,7 @@ def _get_session_time_range(df: pd.DataFrame) -> Tuple[float, float]:
 # ── Global CSS Injection ──────────────────────────────────────────────────────
 st.markdown(_DARK_THEME_CSS, unsafe_allow_html=True)
 
+
 import streamlit.components.v1 as components
 
 # ── Disable typing in selectboxes (JS injection) ─────────────────────────────
@@ -196,22 +197,37 @@ with tab1:
     # ── Master scrubber at the TOP of Race Intelligence ────────────────────
     st.markdown("**⏱ Session Time — Master Scrubber**")
 
+    import datetime
     min_t, max_t = _get_session_time_range(sel.df_driver)
 
-    # Clamp session state value to valid range
-    if "scrub_seconds" not in st.session_state:
-        st.session_state["scrub_seconds"] = max_t
-    else:
-        st.session_state["scrub_seconds"] = max(min_t, min(st.session_state["scrub_seconds"], max_t))
+    if min_t > 0:
+        gap_dt = datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=min_t)
+        formatted_gap = gap_dt.strftime('%H:%M:%S.%f')[:-5]
+        st.info(f"Telemetry data for this session begins at **{formatted_gap}**. *This initial gap typically occurs because the driver was waiting in the garage before their first out-lap.*", icon="ℹ️")
 
-    st.slider(
+    base_date = datetime.datetime(2000, 1, 1)
+    min_dt = base_date + datetime.timedelta(seconds=min_t)
+    max_dt = base_date + datetime.timedelta(seconds=max_t)
+
+    # Initialize scrub_dt if needed
+    if "scrub_dt" not in st.session_state:
+        st.session_state["scrub_dt"] = base_date + datetime.timedelta(seconds=st.session_state.get("scrub_seconds", max_t))
+
+    # Clamp session state value to valid range
+    st.session_state["scrub_dt"] = max(min_dt, min(st.session_state["scrub_dt"], max_dt))
+
+    selected_dt = st.slider(
         "Master session time",
-        min_value=min_t,
-        max_value=max_t,
-        format="%.1f s",
-        key="scrub_seconds",
+        min_value=min_dt,
+        max_value=max_dt,
+        format="HH:mm:ss.S",
+        key="scrub_dt",
         label_visibility="collapsed",
+        step=datetime.timedelta(milliseconds=100)
     )
+    
+    # Sync back to scrub_seconds so the rest of the code works
+    st.session_state["scrub_seconds"] = (selected_dt - base_date).total_seconds()
 
     st.markdown("---")
 
@@ -219,7 +235,7 @@ with tab1:
 
     with col_left:
         scrub = st.session_state.get("scrub_seconds", 0.0)
-        render_cv_feed(scrub_seconds=scrub)
+        render_cv_feed(scrub_seconds=scrub, min_t=min_t)
 
     with col_right:
         st.markdown("**LIVE TRACK MAP**")
@@ -233,31 +249,14 @@ with tab1:
         )
         mode_key = "speed" if map_mode == "Speed" else "mistakes"
 
-        # Overlay controls (new — only show if data exists)
-        overlay_col1, overlay_col2 = st.columns(2)
-        with overlay_col1:
-            show_optimal = st.checkbox(
-                "Show A* line",
-                value=False,
-                disabled=(racing_line_data is None),
-                help="Requires racing line data. Run optimal_line.py first."
-            )
-        with overlay_col2:
-            show_ghost = st.checkbox(
-                "Show ghost dot",
-                value=False,
-                disabled=(racing_line_data is None),
-                help="Ghost dot shows where you should be on the optimal line."
-            )
-
         render_track_map(
             df_filtered=sel.df_driver,
             mode=mode_key,
             df_mistakes=df_mistakes,
             scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
             racing_line_data=racing_line_data,
-            show_optimal_line=show_optimal,
-            show_ghost=show_ghost
+            show_optimal_line=False,
+            show_ghost=False
         )
 
 # ── Tab 2: Telemetry ─────────────────────────────────────────────────────────
