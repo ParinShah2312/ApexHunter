@@ -1,6 +1,6 @@
 """
 ApexHunter Frontend - Sidebar
-Renders all sidebar filters, AI model status indicators, export buttons,
+Renders all sidebar filters, AI model status indicators,
 and returns the user's selections.
 """
 
@@ -11,11 +11,6 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-@st.cache_data(show_spinner=False)
-
-
-def _convert_df_to_csv(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8")
 
 from config import (
     AVAILABLE_YEARS,
@@ -44,8 +39,6 @@ class SidebarSelections:
     session_filepath: str
     mistake_parquet_path: str
     mistake_meta_path: str
-    compare_driver_number: Optional[str]
-    df_compare: Optional[pd.DataFrame]
     racing_line_path: str
     tyre_prediction_path: str
     df_full: pd.DataFrame
@@ -177,21 +170,6 @@ def render_sidebar() -> SidebarSelections:
     driver_number = selected_driver_label.split(" (#")[1].replace(")", "")
     driver_name = selected_driver_label.split(" (#")[0]
 
-    # Compare Driver
-    compare_labels = ["— None —"] + driver_labels
-    compare_idx = _get_default_index("sel_compare", compare_labels)
-    selected_compare_label = st.sidebar.selectbox(
-        "Compare Driver", compare_labels, index=compare_idx, key="sel_compare"
-    )
-
-    compare_driver_number = None
-    df_compare = None
-    if selected_compare_label != "— None —":
-        comp_num = selected_compare_label.split(" (#")[1].replace(")", "")
-        if comp_num != driver_number:
-            compare_driver_number = comp_num
-            df_compare = df[df["Driver"] == comp_num].copy()
-
     # Filter primary driver
     df_driver = df[df["Driver"].astype(str) == driver_number].copy()
 
@@ -235,50 +213,6 @@ def render_sidebar() -> SidebarSelections:
         unsafe_allow_html=True,
     )
 
-    # ── Export Section ────────────────────────────────────────────────────
-    st.sidebar.markdown("---")
-    col1, col2, col3 = st.sidebar.columns(3)
-
-    # Export CSV
-    with col1:
-        if has_iso:
-            df_mistakes = load_mistake_data(mistake_parquet_path)
-            if df_mistakes is not None:
-                csv_data = _convert_df_to_csv(df_mistakes)
-                st.download_button("CSV", data=csv_data, file_name=f"{output_stem}_mistakes.csv", mime="text/csv")
-            else:
-                st.button("CSV", disabled=True)
-        else:
-            st.button("CSV", disabled=True)
-
-    # Export Report
-    with col2:
-        top_speed = float(df_driver["Speed"].max()) if not df_driver.empty else 0.0
-        report_lines = [
-            "ApexHunter v2.0 — Session Report",
-            "=" * 40,
-            f"Session: {selected_session}",
-            f"Year: {selected_year}",
-            f"Driver: {driver_name} (#{driver_number})",
-            f"Total rows: {len(df_driver)}",
-            f"Top Speed: {top_speed:.1f} km/h",
-        ]
-        if has_iso:
-            report_lines.append(f"Mistake parquet: {output_stem}_mistakes.parquet")
-        report_text = "\n".join(report_lines)
-        st.download_button(
-            "Report",
-            data=report_text.encode("utf-8"),
-            file_name=f"{output_stem}_report.txt",
-            mime="text/plain",
-        )
-
-    # Export Video
-    with col3:
-        if has_video:
-            st.button("Video", disabled=True, help="Use file explorer to access videos")
-        else:
-            st.button("Video", disabled=True)
 
     # ── Footer ────────────────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -293,8 +227,6 @@ def render_sidebar() -> SidebarSelections:
         session_filepath=session_filepath,
         mistake_parquet_path=mistake_parquet_path,
         mistake_meta_path=mistake_meta_path,
-        compare_driver_number=compare_driver_number,
-        df_compare=df_compare,
         racing_line_path=str(racing_line_json),
         tyre_prediction_path=tyre_prediction_path,
         df_full=df,

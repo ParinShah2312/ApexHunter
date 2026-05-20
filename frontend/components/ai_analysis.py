@@ -13,34 +13,6 @@ from config import DRIVER_MAPPING
 from components.data_loader import downsample
 
 
-def _build_cv_scores_chart(cv_scores: dict, best_contamination: float) -> go.Figure:
-    """Build the contamination grid search bar chart figure."""
-    x_vals = [float(k) for k in cv_scores.keys()]
-    y_vals = list(cv_scores.values())
-
-    colors = [
-        "#00d4ff" if abs(x - best_contamination) < 1e-6 else "#3a4558"
-        for x in x_vals
-    ]
-
-    fig_cv = go.Figure(
-        go.Bar(
-            x=[str(x) for x in x_vals],
-            y=y_vals,
-            marker_color=colors,
-        )
-    )
-    fig_cv.update_layout(
-        height=180,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#0f1217",
-        font=dict(color="#6b7890", size=11),
-        margin=dict(t=10, b=30, l=40, r=10),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
-    )
-    return fig_cv
-
 
 def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
     """Build the full tyre cliff Plotly figure for one stint."""
@@ -146,17 +118,30 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
         return
 
     contamination = meta["best_contamination"]
-    total_mistakes = meta["total_mistakes"]
-    rate = meta["mistake_rate_pct"]
+    total_mistakes = int(df_mistakes["is_mistake"].sum())
+    total_rows = len(df_mistakes)
+    rate = (total_mistakes / total_rows * 100) if total_rows > 0 else 0.0
     ref_name = DRIVER_MAPPING.get(meta["reference_driver"], meta["reference_driver"])
 
     st.markdown("**ISOLATION FOREST · Mistake Detection**")
     st.caption(
-        f"contamination={contamination:.2f} · {total_mistakes} anomalies "
-        f"({rate:.1f}%) · ref: {ref_name}"
+        f"contamination={contamination:.3f} · {total_mistakes} anomalies "
+        f"({contamination:.3f}) · ref: {ref_name}"
     )
 
-    # Track map colored by anomaly_score
+    # Lap selector — filter mistakes to a single lap
+    df_display = df_mistakes
+    if "LapNumber" in df_mistakes.columns:
+        available_laps = sorted(df_mistakes[df_mistakes["LapNumber"] > 0]["LapNumber"].unique())
+        if available_laps:
+            lap_options = [f"Lap {lap}" for lap in available_laps]
+            selected_lap_label = st.selectbox(
+                "Select Lap", lap_options, key="ai_mistake_lap_selector"
+            )
+            selected_lap = available_laps[lap_options.index(selected_lap_label)]
+            df_display = df_mistakes[df_mistakes["LapNumber"] == selected_lap]
+
+    # Track map — full track background in neutral blue
     fig_map = go.Figure()
     df_map = downsample(df_mistakes, max_points=8000)
 
@@ -166,20 +151,17 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
             y=df_map["Y"],
             mode="markers",
             marker=dict(
-                color=df_map["anomaly_score"].values,
-                colorscale=["#00ff88", "#ffb800", "#ff3a3a"],
-                cmin=-0.3,
-                cmax=0.3,
-                colorbar=dict(title="Anomaly Score", thickness=12, tickfont=dict(color="#6b7890")),
+                color="#3abdc7",
                 size=3,
-                opacity=0.7,
+                opacity=0.5,
             ),
             showlegend=False,
-            hovertemplate="Score: %{marker.color:.3f}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
+            hovertemplate="X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
         )
     )
 
-    df_m = df_mistakes[df_mistakes["is_mistake"] == True]
+    # Mistake markers — only from the selected lap
+    df_m = df_display[df_display["is_mistake"] == True]
     if not df_m.empty:
         fig_map.add_trace(
             go.Scatter(
@@ -205,38 +187,19 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
     )
     st.plotly_chart(fig_map, width='stretch')
 
-    # Stats grid — Row 1
     s1, s2, s3 = st.columns(3)
     with s1:
-        st.metric("Total Anomalies", str(meta["total_mistakes"]))
+        lap_mistakes = int(df_display["is_mistake"].sum())
+        st.metric("Anomalies", str(lap_mistakes))
     with s2:
         brake_override = int(
-            (df_mistakes["is_mistake"] & (df_mistakes["brake_intensity"] > 0.5)).sum()
+            (df_display["is_mistake"] & (df_display["brake_intensity"] > 0.5)).sum()
         )
         st.metric("Brake Override", str(brake_override))
     with s3:
-        throttle_slip = int(
-            (
-                df_mistakes["is_mistake"]
-                & (df_mistakes["throttle_intensity"] < 0.2)
-                & (df_mistakes["speed_delta"] < -5.0)
-            ).sum()
-        )
-        st.metric("Throttle Slip", str(throttle_slip))
+        st.metric("Mistake Rate", f"{contamination:.3f}")
 
-    # Stats grid — Row 2
-    s4, s5, s6 = st.columns(3)
-    with s4:
-        st.metric("Contamination", str(meta["best_contamination"]))
-    with s5:
-        st.metric("K-Fold Score", f"{meta['best_cv_score']:.4f}")
-    with s6:
-        st.metric("Mistake Rate", f"{meta['mistake_rate_pct']:.1f}%")
 
-    # CV Scores expander
-    with st.expander("Grid Search CV Scores"):
-        fig_cv = _build_cv_scores_chart(meta["cv_scores"], meta["best_contamination"])
-        st.plotly_chart(fig_cv, width='stretch')
 
 
 def _render_lstm_column(tyre_data: Optional[dict]) -> None:
@@ -325,14 +288,7 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
         else:
             st.metric("Proj. End Pace", "—")
 
-    # Model details expander
-    with st.expander("Model details"):
-        st.markdown(f"""
-- **Session:** {tyre_data.get('session_file', '—')}
-- **Driver:** {tyre_data.get('driver', '—')}
-- **Total stints:** {len(stints)}
-- **Generated:** {tyre_data.get('timestamp', '—')}
-        """)
+
 
 
 def render_ai_analysis(

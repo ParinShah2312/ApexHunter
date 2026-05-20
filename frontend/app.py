@@ -167,21 +167,31 @@ from components.telemetry_charts import render_telemetry
 from components.track_map import render_track_map
 from components.cv_feed import render_cv_feed
 from components.ai_analysis import render_ai_analysis
-from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line, load_tyre_prediction
+from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line, load_tyre_prediction, get_lap_boundaries, assign_lap_numbers
 from components.racing_line import render_racing_line
 from components.bigdata_tab import render_bigdata_tab
+from components.header_bar import _parse_session_label
 
 # ── Step 1: Sidebar ───────────────────────────────────────────────────────────
 sel = render_sidebar()
 
 # ── Step 2: Load AI data ──────────────────────────────────────────────────────
-df_mistakes = load_mistake_data(sel.mistake_parquet_path)
-meta = load_mistake_meta(sel.mistake_meta_path)
+import os as _os
+_parquet_mtime = _os.path.getmtime(sel.mistake_parquet_path) if _os.path.exists(sel.mistake_parquet_path) else 0
+_meta_mtime = _os.path.getmtime(sel.mistake_meta_path) if _os.path.exists(sel.mistake_meta_path) else 0
+df_mistakes = load_mistake_data(sel.mistake_parquet_path, mtime=_parquet_mtime)
+meta = load_mistake_meta(sel.mistake_meta_path, mtime=_meta_mtime)
 racing_line_data = load_racing_line(sel.racing_line_path)
 tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
+# ── Step 2b: Assign lap numbers to mistake data ──────────────────────────────
+round_num, session_type = _parse_session_label(sel.session_label)
+lap_boundaries = get_lap_boundaries(sel.year, round_num, session_type, sel.driver_number)
+if df_mistakes is not None and lap_boundaries:
+    df_mistakes = assign_lap_numbers(df_mistakes, lap_boundaries)
+
 # ── Step 3: Header bar ────────────────────────────────────────────────────────
-render_header_bar(sel, meta)
+render_header_bar(sel)
 
 # ── Step 4: Tabs ──────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -249,6 +259,18 @@ with tab1:
         )
         mode_key = "speed" if map_mode == "Speed" else "mistakes"
 
+        # Lap selector for Mistakes mode
+        df_mistakes_lap = None
+        if mode_key == "mistakes" and df_mistakes is not None and "LapNumber" in df_mistakes.columns:
+            available_laps = sorted(df_mistakes[df_mistakes["LapNumber"] > 0]["LapNumber"].unique())
+            if available_laps:
+                lap_options = [f"Lap {lap}" for lap in available_laps]
+                selected_lap_label = st.selectbox(
+                    "Select Lap", lap_options, key="mistake_lap_selector"
+                )
+                selected_lap = available_laps[lap_options.index(selected_lap_label)]
+                df_mistakes_lap = df_mistakes[df_mistakes["LapNumber"] == selected_lap]
+
         render_track_map(
             df_filtered=sel.df_driver,
             mode=mode_key,
@@ -256,7 +278,8 @@ with tab1:
             scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
             racing_line_data=racing_line_data,
             show_optimal_line=False,
-            show_ghost=False
+            show_ghost=False,
+            df_mistakes_lap=df_mistakes_lap
         )
 
 # ── Tab 2: Telemetry ──────────────────────────────────────────────────────────
@@ -265,8 +288,6 @@ with tab2:
         df_driver=sel.df_driver,
         driver_name=sel.driver_name,
         driver_number=sel.driver_number,
-        df_compare=sel.df_compare,
-        compare_number=sel.compare_driver_number,
     )
 
 # ── Tab 3: AI Analysis ────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 """
 ApexHunter Frontend - Telemetry Charts
 Renders the metrics row, time scrubber, and the five-panel telemetry chart.
-Supports compare driver overlay.
 """
 
 from typing import Optional, Tuple
@@ -56,8 +55,6 @@ def _build_telemetry_figure(
     df_chart: pd.DataFrame,
     x_data: pd.Series,
     driver_number: str,
-    df_compare_chart: Optional[pd.DataFrame],
-    compare_number: Optional[str],
     scrub_val: float
 ) -> go.Figure:
     """Build the 5-panel Plotly subplot figure."""
@@ -99,41 +96,6 @@ def _build_telemetry_figure(
             col=1,
         )
 
-    # Compare driver traces
-    if df_compare_chart is not None and compare_number is not None:
-        time_col = _get_time_col(df_compare_chart)
-        if pd.api.types.is_timedelta64_dtype(df_compare_chart[time_col]):
-            x_comp = df_compare_chart[time_col].dt.total_seconds()
-        else:
-            x_comp = df_compare_chart[time_col]
-
-        comp_configs = [
-            (1, "Speed",    "rgba(0,212,255,0.53)", "lines", None,
-             "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:.1f} km/h</b><extra></extra>"),
-            (2, "Throttle", "rgba(0,255,136,0.53)", "lines", None,
-             "[Compare] At <b>%{x:.1f}s</b> — throttle <b>%{y:.0f}%</b><extra></extra>"),
-            (3, "Brake",    "rgba(255,58,58,0.53)", "lines", None,
-             "[Compare] At <b>%{x:.1f}s</b> — brake <b>%{y:.0f}%</b><extra></extra>"),
-            (4, "nGear",    "rgba(107,120,144,0.53)", "lines", "hv",
-             "[Compare] At <b>%{x:.1f}s</b> — <b>gear %{y:.0f}</b><extra></extra>"),
-            (5, "RPM",      "rgba(168,85,247,0.53)", "lines", None,
-             "[Compare] At <b>%{x:.1f}s</b> — <b>%{y:,.0f} RPM</b><extra></extra>"),
-        ]
-
-        for row, col_name, color, mode, line_shape, htpl in comp_configs:
-            fig.add_trace(
-                go.Scatter(
-                    x=x_comp,
-                    y=df_compare_chart[col_name],
-                    mode=mode,
-                    opacity=0.6,
-                    line=dict(color=color, dash="dash", shape=line_shape) if line_shape else dict(color=color, dash="dash"),
-                    name=f"{col_name} #{compare_number}",
-                    hovertemplate=htpl,
-                ),
-                row=row,
-                col=1,
-            )
 
     # Scrubber vertical line
     shapes = []
@@ -159,7 +121,7 @@ def _build_telemetry_figure(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0f1217",
         font=dict(color="#6b7890", size=11),
-        showlegend=True if df_compare_chart is not None else False,
+        showlegend=False,
         margin=dict(t=40, b=20, l=50, r=20),
     )
 
@@ -180,8 +142,6 @@ def render_telemetry(
     df_driver: pd.DataFrame,
     driver_name: str,
     driver_number: str,
-    df_compare: Optional[pd.DataFrame] = None,
-    compare_number: Optional[str] = None,
 ) -> Optional[Tuple[pd.DataFrame, str]]:
     """Main entry point: renders the telemetry playback section.
 
@@ -242,24 +202,11 @@ def render_telemetry(
     else:
         x_data = df_chart[time_col]
 
-    # Prepare compare data if needed
-    df_compare_chart = None
-    if df_compare is not None and compare_number is not None:
-        if pd.api.types.is_timedelta64_dtype(df_compare[time_col]):
-            df_comp_filt = df_compare[df_compare[time_col].dt.total_seconds() <= scrub].copy()
-        else:
-            df_comp_filt = df_compare[df_compare[time_col] <= scrub].copy()
-
-        if not df_comp_filt.empty:
-            df_compare_chart = downsample(df_comp_filt)
-
     # Build and render figure
     fig = _build_telemetry_figure(
         df_chart=df_chart,
         x_data=x_data,
         driver_number=driver_number,
-        df_compare_chart=df_compare_chart,
-        compare_number=compare_number,
         scrub_val=scrub_val
     )
     st.plotly_chart(fig, width='stretch')

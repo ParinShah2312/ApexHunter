@@ -3,13 +3,12 @@ ApexHunter Frontend - Header Bar
 Renders the persistent KPI strip above the tabs.
 """
 
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 import fastf1
 import streamlit as st
 
-from config import DRIVER_MAPPING, TEAM_MAPPING
+from config import TEAM_MAPPING
 
 
 @st.cache_data(show_spinner=False)
@@ -58,60 +57,39 @@ def _driver_identity_html(driver_number: str, driver_name: str, team_name: str) 
     )
 
 
-def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
+def render_header_bar(sel) -> None:
     """Renders the persistent KPI strip above the tabs.
 
     Args:
         sel: SidebarSelections dataclass.
-        mistake_meta: Parsed mistake metadata dict, or None.
     """
-    cols = st.columns([1, 1, 1, 1, 1.2, 1.2, 1.8])
+    cols = st.columns([3, 1.5, 1.5, 1.5])
 
     # Derive round_num and session_type
     round_num, session_type = _parse_session_label(sel.session_label)
 
-    # KPI 1 — Lap Time
-    with cols[0]:
-        lap_time_str = _get_fastest_lap(sel.year, round_num, session_type, sel.driver_number)
-        st.metric(label="Lap Time", value=lap_time_str)
+    # Extract track name from session label ("Round N: TrackName - Session")
+    try:
+        track_name = sel.session_label.split(": ", 1)[1].rsplit(" - ", 1)[0]
+    except (IndexError, ValueError):
+        track_name = "—"
 
-    # KPI 2 — Top Speed
+    # KPI 1 — Track
+    with cols[0]:
+        st.metric(label="Track", value=track_name)
+
+    # KPI 2 — Lap Time
     with cols[1]:
+        lap_time_str = _get_fastest_lap(sel.year, round_num, session_type, sel.driver_number)
+        st.metric(label="Fastest Lap Time", value=lap_time_str)
+
+    # KPI 3 — Top Speed
+    with cols[2]:
         top_speed = float(sel.df_driver["Speed"].max()) if not sel.df_driver.empty else 0.0
         st.metric("Top Speed", f"{top_speed:.1f} km/h")
 
-    # KPI 3 — AI Deviation / Mistake Rate
-    with cols[2]:
-        if mistake_meta is not None and "reference_driver" in mistake_meta:
-            st.metric("Mistake Rate", f"{mistake_meta['mistake_rate_pct']:.1f}%")
-        else:
-            st.metric("AI Deviation", "—")
-
-    # KPI 4 — Mistakes
+    # Column 4 — Driver Identity
     with cols[3]:
-        if mistake_meta is not None:
-            st.metric("Mistakes", str(mistake_meta["total_mistakes"]))
-        else:
-            st.metric("Mistakes", "—")
-
-    # KPI 5 — Reference Driver
-    with cols[4]:
-        if mistake_meta is not None:
-            ref = mistake_meta["reference_driver"]
-            ref_name = DRIVER_MAPPING.get(ref, ref)
-            st.metric("Reference", ref_name)
-        else:
-            st.metric("Reference", "—")
-
-    # KPI 6 — Best Contamination
-    with cols[5]:
-        if mistake_meta is not None:
-            st.metric("Contamination", str(mistake_meta["best_contamination"]))
-        else:
-            st.metric("Contamination", "—")
-
-    # Column 7 — Driver Identity
-    with cols[6]:
         team_name = TEAM_MAPPING.get(sel.driver_number, "Unknown Team")
         st.markdown(
             _driver_identity_html(sel.driver_number, sel.driver_name, team_name),
@@ -119,3 +97,4 @@ def render_header_bar(sel, mistake_meta: Optional[dict]) -> None:
         )
 
     st.markdown("---")
+

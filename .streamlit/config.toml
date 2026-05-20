@@ -1,0 +1,5 @@
+[server]
+# Allow Streamlit to serve files from the static/ directory
+enableStaticServing = true
+# Increase max message size to 300 MB for video streaming
+maxMessageSize = 300

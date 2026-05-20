@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from cv.inference_geometry import classify_apex_status, compute_wheel_positions, get_turn_context
 from cv.inference_hud import HUDStateTracker, draw_hud
-from cv.inference_io import create_csv_writer, create_video_writer, open_video, write_csv_row
+from cv.inference_io import create_csv_writer, create_video_writer, finalize_video, open_video, write_csv_row
 from cv.inference_masking import process_masks
 from utils import CONFIG, DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
 
@@ -80,6 +80,7 @@ def process_video(input_video_path: Path, force: bool = False) -> None:
         write_csv_row(csv_w, idx, fps, ds, status, curb)
         out.write(draw_hud(frame, hud, lw, rw, cp, dw, curb, status, color, ds, turn, ALPHA, idx))
     cap.release(); out.release(); csv_fh.close()
+    finalize_video(vid_out)
     logger.info(f"Done — Video: {vid_out.resolve()}, CSV: {csv_out.resolve()}")
 
 

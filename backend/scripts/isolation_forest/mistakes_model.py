@@ -12,7 +12,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.model_selection import KFold
 
 # ── Model constants ───────────────────────────────────────────────────────────
-CONTAMINATION_VALUES: list = [0.05, 0.08, 0.10, 0.12, 0.15, 0.20]
+CONTAMINATION_VALUES: list = [0.005, 0.01, 0.015, 0.02, 0.03, 0.05]
 N_FOLDS: int = 5
 N_ESTIMATORS: int = 200
 RANDOM_STATE: int = 42

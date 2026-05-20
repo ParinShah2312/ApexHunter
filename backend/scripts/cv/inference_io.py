@@ -3,10 +3,15 @@ Handles VideoCapture setup, VideoWriter setup, and CSV row writing.
 """
 
 import csv
+import logging
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Tuple
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 
 def open_video(input_path: Path) -> Tuple[cv2.VideoCapture, int, int, int, int]:
@@ -38,6 +43,9 @@ def create_video_writer(
 ) -> cv2.VideoWriter:
     """Create and return a VideoWriter using mp4v codec.
 
+    OpenCV writes an intermediate file with mp4v; call finalize_video()
+    after releasing the writer to re-encode to H.264 with proper compression.
+
     Args:
         output_path: Path for the output video file.
         fps: Frames per second.
@@ -47,8 +55,53 @@ def create_video_writer(
     Returns:
         An opened cv2.VideoWriter.
     """
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     return cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+
+def finalize_video(output_path: Path) -> None:
+    """Re-encode the OpenCV output to a web-friendly H.264 MP4 using ffmpeg.
+
+    OpenCV's built-in encoders on Windows produce enormous files (mp4v is
+    uncompressed-ish, avc1 uses ~170 Mbps).  This step re-encodes to a
+    properly compressed H.264 file at ~8 Mbps — small enough for Streamlit
+    to serve and for browsers to stream.
+
+    Args:
+        output_path: Path to the mp4v file written by OpenCV.
+    """
+    if not shutil.which("ffmpeg"):
+        logger.warning(
+            "ffmpeg not found on PATH — skipping re-encode.  "
+            "The output video will be very large and may not play in the dashboard."
+        )
+        return
+
+    tmp_path = output_path.with_suffix(".tmp.mp4")
+    output_path.rename(tmp_path)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(tmp_path),
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+
+    logger.info("Re-encoding video to H.264 (CRF 23) …")
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        tmp_path.unlink()
+        size_mb = output_path.stat().st_size / (1024 * 1024)
+        logger.info(f"Re-encode complete — {output_path.name}: {size_mb:.1f} MB")
+    except subprocess.CalledProcessError as exc:
+        logger.error(f"ffmpeg re-encode failed: {exc.stderr}")
+        # Restore the original so the pipeline doesn't lose data
+        if tmp_path.exists():
+            tmp_path.rename(output_path)
 
 
 def create_csv_writer(csv_path: Path) -> Tuple[Any, Any]:

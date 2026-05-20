@@ -44,8 +44,16 @@ def _interpolate_path_position(
     return (x, y)
 
 
-def _add_mistakes_traces(fig: go.Figure, df_mistakes: pd.DataFrame) -> None:
-    """Add mistake analysis traces to the figure."""
+def _add_mistakes_traces(fig: go.Figure, df_mistakes: pd.DataFrame, df_mistakes_lap: Optional[pd.DataFrame] = None) -> None:
+    """Add mistake analysis traces to the figure.
+
+    Args:
+        fig: The Plotly figure to add traces to.
+        df_mistakes: Full mistake DataFrame (all laps) — used for the track background.
+        df_mistakes_lap: Lap-filtered mistake DataFrame — used for the red X markers.
+                         If None, uses df_mistakes for both.
+    """
+    # Background: full track outline in neutral blue
     df_map = downsample(df_mistakes, max_points=8000)
 
     fig.add_trace(
@@ -54,26 +62,19 @@ def _add_mistakes_traces(fig: go.Figure, df_mistakes: pd.DataFrame) -> None:
             y=df_map["Y"],
             mode="markers",
             marker=dict(
-                color=df_map["anomaly_score"].values,
-                colorscale=["#00ff88", "#ffb800", "#ff3a3a"],
-                reversescale=False,
-                cmin=-0.3,
-                cmax=0.3,
-                colorbar=dict(
-                    title="Anomaly Score",
-                    thickness=12,
-                    tickfont=dict(color="#6b7890"),
-                ),
+                color="#3abdc7",
                 size=3,
-                opacity=0.7,
+                opacity=0.5,
             ),
-            hovertemplate="Score: %{marker.color:.3f}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-            name="All points",
+            hovertemplate="X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
+            name="Track",
             showlegend=False,
         )
     )
 
-    df_mistake_rows = df_mistakes[df_mistakes["is_mistake"] == True]
+    # Mistake markers: only from the selected lap
+    df_source = df_mistakes_lap if df_mistakes_lap is not None else df_mistakes
+    df_mistake_rows = df_source[df_source["is_mistake"] == True]
     if not df_mistake_rows.empty:
         fig.add_trace(
             go.Scatter(
@@ -236,18 +237,20 @@ def render_track_map(
     scrub_seconds: float,
     racing_line_data: Optional[dict] = None,
     show_optimal_line: bool = False,
-    show_ghost: bool = False
+    show_ghost: bool = False,
+    df_mistakes_lap: Optional[pd.DataFrame] = None
 ) -> None:
     """Renders the track map in speed or mistakes mode.
 
     Args:
         df_filtered: DataFrame filtered to current scrub range.
         mode: "speed" or "mistakes".
-        df_mistakes: Isolation Forest annotated DataFrame, or None.
+        df_mistakes: Full Isolation Forest annotated DataFrame (all laps), or None.
         scrub_seconds: Current scrub position in seconds.
         racing_line_data: JSON output from optimal_line.py or None.
         show_optimal_line: Whether to draw the A* dashed line.
         show_ghost: Whether to draw the ghost dot.
+        df_mistakes_lap: Lap-filtered mistake DataFrame for markers only. If None, uses df_mistakes.
     """
     show_legend = False
 
@@ -260,7 +263,7 @@ def render_track_map(
     fig = _build_track_figure(show_legend=show_legend)
 
     if mode == "mistakes" and df_mistakes is not None:
-        _add_mistakes_traces(fig, df_mistakes)
+        _add_mistakes_traces(fig, df_mistakes, df_mistakes_lap)
     elif mode == "speed":
         _add_speed_trace(fig, df_filtered)
 
