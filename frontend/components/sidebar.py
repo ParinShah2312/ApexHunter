@@ -17,7 +17,6 @@ from config import (
     DATA_LAKE_DIR,
     DRIVER_MAPPING,
     MISTAKE_DATA_DIR,
-    PROCESSED_VIDEO_DIR,
     SESSION_LABEL_MAP,
     RACING_LINES_DIR,
     TYRE_PREDICTIONS_DIR,
@@ -185,12 +184,6 @@ def render_sidebar() -> SidebarSelections:
     st.sidebar.markdown("---")
     st.sidebar.markdown("**AI Models**")
 
-    # YOLOv11-Seg: check specific video
-    has_video = any(PROCESSED_VIDEO_DIR.glob(f"{output_stem}*.mp4")) if PROCESSED_VIDEO_DIR.exists() else False
-    st.sidebar.markdown(
-        f"{_status_dot(has_video)} YOLOv11-Seg",
-        unsafe_allow_html=True,
-    )
 
     # Isolation Forest
     has_iso = Path(mistake_parquet_path).exists()
