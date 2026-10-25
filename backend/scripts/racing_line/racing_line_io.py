@@ -8,12 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 from racing_line.racing_line_grid import GridNode
 from racing_line.racing_line_search import SearchResult
-from utils import IST
+from utils import IST, enable_fastf1_cache
 
 REQUIRED_COLUMNS: List[str] = ["Driver", "X", "Y", "Speed", "Brake", "SessionTime"]
 
@@ -219,6 +218,7 @@ def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logg
     """Fetch the fastest lap boundaries for the given driver."""
     import fastf1
     try:
+        enable_fastf1_cache()
         year = int(df["Year"].iloc[0])
         round_val = df["Round"].iloc[0]
         try:
@@ -229,7 +229,7 @@ def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logg
 
         session = fastf1.get_session(year, round_val, session_name)
         session.load(telemetry=False, weather=False, messages=False)
-        lap = session.laps.pick_driver(driver).pick_fastest()
+        lap = session.laps.pick_drivers(driver).pick_fastest()
         start_t = lap["LapStartTime"]
         end_t = lap["Time"]
 

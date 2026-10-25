@@ -2,6 +2,7 @@ pandas
 numpy
 fastf1
 opencv-python
+pillow
 yt-dlp
 ultralytics
 staticmap
@@ -11,6 +12,7 @@ plotly
 torch
 ruff
 scikit-learn
+scipy
 pyarrow
 pymongo
 pyspark

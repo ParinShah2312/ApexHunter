@@ -176,6 +176,18 @@ def load_cv_metrics(filepath: str) -> Optional[pd.DataFrame]:
     return df
 
 
+def load_turn_windows(filepath: str) -> Optional[List[dict]]:
+    """Read the turn windows JSON written by cv/run_inference.py (one dict per corner with
+    turn, start_s, apex_s, end_s, direction, speed_category, min_speed_kmh).
+
+    Returns None if the file does not exist (e.g. a video processed before turn windows were saved).
+    """
+    if not Path(filepath).exists():
+        return None
+    with open(filepath, "r") as f:
+        return json.load(f)["turns"]
+
+
 def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
     """Intelligently downsamples a DataFrame for chart rendering performance.
 

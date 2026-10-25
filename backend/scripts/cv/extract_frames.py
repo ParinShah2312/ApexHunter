@@ -16,6 +16,9 @@ import os
 import sys
 from pathlib import Path
 
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from utils import CONFIG, DATA_LAKE_DIR, setup_logger
 
 logger = setup_logger(__name__)

@@ -3,7 +3,7 @@ Handles mask resizing, contour extraction, turn direction detection,
 and HUD layer building.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import cv2
 import numpy as np

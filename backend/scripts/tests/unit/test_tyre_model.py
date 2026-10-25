@@ -1,9 +1,11 @@
-"""Unit tests for tyre_model.py — LSTM architecture and training loop."""
+"""Unit tests for lstm/tyre_model.py: the LSTM learns, search reports truthfully, evaluation
+de-normalises correctly, MC-dropout uncertainty, and the cliff-lap rule."""
 
 import logging
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -13,88 +15,98 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import torch
 import torch.nn as nn
 
-from lstm.tyre_data import SEQUENCE_LENGTH
+from lstm.tyre_data import LAP_FEATURES, SEQUENCE_LENGTH
 from lstm.tyre_model import (
-    DROPOUT_RATE,
-    INPUT_SIZE,
-    NUM_LAYERS,
-    TyreCliffLSTM,
-    evaluate_on_test,
-    monte_carlo_predict,
-    run_hyperparameter_search,
-    train_one_config,
+    DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, evaluate_on_test, monte_carlo_predict,
+    predict_single_stint, run_hyperparameter_search, train_one_config,
 )
 
-
-def _silent_logger() -> logging.Logger:
-    """Return a logger that writes nowhere."""
-    lg = logging.getLogger("test_tyre_model_silent")
-    lg.handlers = [logging.NullHandler()]
-    lg.setLevel(logging.CRITICAL)
-    return lg
+LOG = logging.getLogger("test_tyre_model")
+LOG.addHandler(logging.NullHandler())
+LOG.propagate = False
 
 
-class TestTyreCliffLSTM(unittest.TestCase):
-    """Tests for the TyreCliffLSTM model class."""
+def _learnable(n: int = 400, seed: int = 0):
+    """Target = mean of feature 0 over the window: a simple, fully learnable signal."""
+    rng = np.random.RandomState(seed)
+    X = rng.normal(0, 1, (n, SEQUENCE_LENGTH, INPUT_SIZE)).astype(np.float32)
+    y = X[:, :, 0].mean(axis=1).astype(np.float32)
+    return X, y
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        rng = np.random.RandomState(42)
-        N = 100
-        cls.X = rng.rand(N, SEQUENCE_LENGTH, INPUT_SIZE).astype(np.float32)
-        cls.y = (rng.rand(N).astype(np.float32) * 100 + 200)
-        cls.logger = _silent_logger()
 
-    def test_model_instantiation(self) -> None:
-        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, DROPOUT_RATE)
-        self.assertIsInstance(model, nn.Module)
+class TestTraining(unittest.TestCase):
 
-    def test_model_forward_output_shape(self) -> None:
-        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, DROPOUT_RATE)
-        x = torch.FloatTensor(self.X[:8])
-        out = model(x)
-        self.assertEqual(out.shape, (8,))
+    def test_model_output_shape(self) -> None:
+        model = TyreCliffLSTM(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE)
+        self.assertEqual(model(torch.zeros(8, SEQUENCE_LENGTH, INPUT_SIZE)).shape, (8,))
 
-    def test_train_one_config_returns_model_and_float(self) -> None:
-        model, mse = train_one_config(
-            self.X[:80], self.y[:80], self.X[80:], self.y[80:],
-            hidden_size=32, learning_rate=0.001,
-            n_epochs=2, logger=self.logger,
-        )
-        self.assertIsInstance(model, TyreCliffLSTM)
-        self.assertIsInstance(mse, float)
-        self.assertGreaterEqual(mse, 0.0)
+    def test_lstm_learns_a_learnable_signal(self) -> None:
+        X, y = _learnable()
+        model, val_mse = train_one_config(X[:320], y[:320], X[320:], y[320:], hidden_size=32,
+                                          learning_rate=0.01, n_epochs=25, logger=LOG)
+        baseline = float(np.mean((y[320:] - y[:320].mean()) ** 2))   # predict the mean
+        self.assertLess(val_mse, 0.3 * baseline)
 
-    def test_hyperparameter_search_returns_valid_config(self) -> None:
-        best_h, best_lr, best_mse = run_hyperparameter_search(
-            self.X, self.y, self.logger
-        )
-        self.assertIn(best_h, [32, 64, 128])
-        self.assertIn(best_lr, [0.001, 0.0005, 0.0001])
-        self.assertGreaterEqual(best_mse, 0.0)
+    def test_search_reports_the_true_score_of_its_choice(self) -> None:
+        X, y = _learnable(200)
+        grid = [{"hidden_size": 8, "learning_rate": 0.0001}, {"hidden_size": 32, "learning_rate": 0.01}]
+        best_h, best_lr, best_mse = run_hyperparameter_search(X, y, LOG, grid=grid, n_epochs=8)
+        self.assertEqual((best_h, best_lr), (32, 0.01))            # the clearly better config wins
+        _, rerun_mse = train_one_config(X[:160], y[:160], X[160:], y[160:], best_h, best_lr, 8, LOG)
+        self.assertAlmostEqual(best_mse, rerun_mse, places=5)       # training is seeded
 
-    def test_monte_carlo_predict_output_shapes(self) -> None:
-        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, DROPOUT_RATE)
-        mean, lower, upper = monte_carlo_predict(model, self.X[:20], n_samples=5)
-        self.assertEqual(mean.shape, (20,))
-        self.assertEqual(lower.shape, (20,))
-        self.assertEqual(upper.shape, (20,))
 
-    def test_monte_carlo_lower_le_mean_le_upper(self) -> None:
-        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, DROPOUT_RATE)
-        mean, lower, upper = monte_carlo_predict(model, self.X[:20], n_samples=10)
-        # Allow tiny floating point tolerance
-        self.assertTrue((lower <= mean + 0.001).all())
-        self.assertTrue((mean <= upper + 0.001).all())
+class _Constant(nn.Module):
+    def forward(self, x):
+        return torch.zeros(x.shape[0])
 
-    def test_evaluate_on_test_returns_float(self) -> None:
-        model, _ = train_one_config(
-            self.X[:80], self.y[:80], self.X[80:], self.y[80:],
-            32, 0.001, 2, self.logger,
-        )
-        mae = evaluate_on_test(model, self.X[80:], self.y[80:], 250.0, 20.0)
-        self.assertIsInstance(mae, float)
-        self.assertGreaterEqual(mae, 0.0)
+
+class TestEvaluation(unittest.TestCase):
+
+    def test_mae_is_reported_in_km_h(self) -> None:
+        y_mean, y_std = 200.0, 10.0
+        y_test_norm = np.array([1.0, -2.0, 0.5], dtype=np.float32)   # 210, 180, 205 km/h
+        mae = evaluate_on_test(_Constant(), np.zeros((3, SEQUENCE_LENGTH, INPUT_SIZE), np.float32),
+                               y_test_norm, y_mean, y_std)
+        self.assertAlmostEqual(mae, (10 + 20 + 5) / 3, places=4)    # model always predicts 200
+
+
+class TestMonteCarloDropout(unittest.TestCase):
+
+    def test_band_contains_mean_varies_and_restores_eval_mode(self) -> None:
+        torch.manual_seed(0)
+        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, 0.5)
+        X = np.random.RandomState(0).rand(10, SEQUENCE_LENGTH, INPUT_SIZE).astype(np.float32)
+        mean, lower, upper = monte_carlo_predict(model, X, n_samples=20)
+        self.assertEqual(mean.shape, (10,))
+        self.assertTrue(np.all(lower <= mean) and np.all(mean <= upper))
+        self.assertTrue(np.all(upper - lower > 0))                  # dropout really was active
+        self.assertFalse(model.training)
+
+
+class TestCliffLap(unittest.TestCase):
+
+    def test_cliff_is_first_lap_over_best_plus_1_5s(self) -> None:
+        n = 8
+        speeds = [200.0] * n
+        stint = {"stint_index": 0, "lap_features": {
+            **{f: [0.0] * n for f in LAP_FEATURES},
+            "race_lap_number": list(range(10, 10 + n)), "mean_speed": speeds,
+            "lap_time_seconds": [90.0] * n}}
+        # track distance = 200 × 90 → predicted time = 18000 / speed
+        pred_speed = np.array([200, 202, 201, 200, 199.9, 197, 195, 190], dtype=float)
+        scaler = mock.MagicMock()
+        scaler.transform.side_effect = lambda a: a
+        with mock.patch("lstm.tyre_model.monte_carlo_predict",
+                        return_value=(pred_speed, pred_speed, pred_speed)):
+            out = predict_single_stint(stint, mock.MagicMock(), scaler, y_mean=0.0, y_std=1.0, seq_len=5)
+        # Predicted times (18000 / speed): best is index 1 at 89.11 s → threshold 90.61 s.
+        # Index 4 = 90.05 s (under), index 5 = 91.37 s (first over) → cliff at index 5.
+        self.assertEqual(out["cliff_lap"], 5)
+        self.assertEqual(out["laps_remaining"], 3)
+        self.assertEqual(out["lap_numbers"], list(range(10, 10 + n)))
+        self.assertAlmostEqual(out["predicted_laps"][1], 89.1089, places=3)
+        self.assertAlmostEqual(out["predicted_laps"][5], 91.3706, places=3)
 
 
 if __name__ == "__main__":

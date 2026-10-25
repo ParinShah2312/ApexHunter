@@ -3,7 +3,6 @@ line search pipeline. Converts raw telemetry X/Y coordinates into a weighted gra
 of on-track nodes suitable for pathfinding algorithms."""
 
 import gc
-import logging
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
@@ -22,7 +21,7 @@ MIN_POINTS_PER_CELL: int = 1
 DIAGONAL_COST_FACTOR: float = 1.4142135623730951
 APPROX_LAP_SECONDS: float = 90.0
 MAX_SPEED_FOR_WEIGHT: float = 380.0
-MAX_BRAKE_FOR_WEIGHT: float = 100.0
+MAX_BRAKE_FOR_WEIGHT: float = 1.0       # FastF1 Brake is binary, so a cell's mean brake is a 0–1 fraction
 
 @dataclass
 
@@ -46,13 +45,14 @@ def compute_node_weight(mean_speed: float, mean_brake: float) -> float:
 
     Args:
         mean_speed: The mean speed of the node.
-        mean_brake: The mean brake of the node.
+        mean_brake: Fraction of the node's samples with the brake on (0–1).
 
     Returns:
         The computed traversal cost.
     """
     speed_reward = (mean_speed / MAX_SPEED_FOR_WEIGHT) * SPEED_WEIGHT_FACTOR
-    brake_penalty = (mean_brake / MAX_BRAKE_FOR_WEIGHT) * BRAKE_WEIGHT_FACTOR
+    brake_fraction = min(max(mean_brake / MAX_BRAKE_FOR_WEIGHT, 0.0), 1.0)
+    brake_penalty = brake_fraction * BRAKE_WEIGHT_FACTOR
     weight = max(0.01, 1.0 - speed_reward + brake_penalty)
     return weight
 
@@ -232,8 +232,9 @@ def find_start_end_nodes(
     if df_filtered.empty:
         df_filtered = df.sort_values("SessionTime")
 
-    x_min = df_filtered["X"].min()
-    y_min = df_filtered["Y"].min()
+    # Same grid origin as build_grid (all samples), otherwise rows map to shifted cells
+    x_min = df["X"].min()
+    y_min = df["Y"].min()
 
     # Keep only rows that map to the largest component
     valid_rows = []

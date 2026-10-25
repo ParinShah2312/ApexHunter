@@ -32,7 +32,7 @@ class TestModelTraining(unittest.TestCase):
         instance.fit.return_value = instance
         MockIF.return_value = instance
         from isolation_forest.mistakes_model import train_final_model
-        result = train_final_model(self.X, 0.10, self.logger)
+        train_final_model(self.X, 0.10, self.logger)
         instance.fit.assert_called_once()
         # The first positional arg to fit should be our X
         actual_X = instance.fit.call_args[0][0]

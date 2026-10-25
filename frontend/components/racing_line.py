@@ -15,11 +15,6 @@ ALGO_COLORS = {
     "dijkstra": "#00d4ff",  # cyan
     "bfs": "#ef4444",       # bright red (distinct from cyan)
 }
-ALGO_LABELS = {
-    "astar": "A*",
-    "dijkstra": "Dijkstra",
-    "bfs": "BFS",
-}
 
 
 def _build_racing_line_figure(

@@ -31,7 +31,7 @@ class TestTelemetryCleaning(unittest.TestCase):
             "Speed": [200.0] * 80 + [500.0] * 5 + [200.0] * 5 + [float('nan')] * 10,
             "RPM": [8000.0] * 80 + [8000.0] * 5 + [20000.0] * 5 + [float('nan')] * 10,
             "Throttle": [50.0] * 80 + [150.0] * 5 + [50.0] * 10 + [float('nan')] * 5,
-            "Brake": [0.0] * 80 + [-10.0] * 3 + [0.0] * 12 + [float('nan')] * 5,
+            "Brake": [0.0] * 80 + [-10.0] * 3 + [1.0] * 6 + [5.0] * 6 + [float('nan')] * 5,
             "X": [100.0] * 90 + [float('nan')] * 10,
             "Y": [200.0] * 90 + [float('nan')] * 10,
             "nGear": [5] * n,
@@ -63,6 +63,10 @@ class TestTelemetryCleaning(unittest.TestCase):
 
     def test_brake_clipped_lower(self):
         self.assertGreaterEqual(self.output_df["Brake"].min(), 0.0)
+
+    def test_brake_clipped_upper_to_binary_range(self):
+        """Brake is an on/off flag, so cleaned values must stay within 0–1."""
+        self.assertLessEqual(self.output_df["Brake"].max(), 1.0)
 
     def test_ffill_fills_partial_nulls(self):
         """Builds a separate DataFrame with partial nulls (not all-core NaN)."""

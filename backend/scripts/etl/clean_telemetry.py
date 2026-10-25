@@ -13,10 +13,14 @@
 
 import argparse
 import gc
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils import DATA_LAKE_DIR, setup_logger
 
@@ -74,7 +78,7 @@ def _clip_telemetry_outliers(df: pd.DataFrame) -> pd.DataFrame:
     if 'Throttle' in df.columns:
         df['Throttle'] = df['Throttle'].clip(lower=0, upper=100)
     if 'Brake' in df.columns:
-        df['Brake'] = df['Brake'].clip(lower=0, upper=100)
+        df['Brake'] = df['Brake'].clip(lower=0, upper=1)       # Binary on/off flag in FastF1
     return df
 
 

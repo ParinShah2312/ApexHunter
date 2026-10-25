@@ -70,6 +70,8 @@ def load_model_artifacts(
 
     Raises:
         FileNotFoundError: If any artifact is missing.
+        ValueError: If the saved model was trained on a different feature set than the
+            current code uses (the model must then be retrained).
     """
     import torch
 
@@ -96,7 +98,18 @@ def load_model_artifacts(
     logger.info(f"Loaded config: {config_path}")
 
     # Reconstruct model
+    from lstm.tyre_data import LAP_FEATURES
     from lstm.tyre_model import TyreCliffLSTM, INPUT_SIZE, NUM_LAYERS, DROPOUT_RATE
+
+    saved_input_size = config.get("input_size")
+    saved_features = config.get("features")
+    if saved_input_size != INPUT_SIZE or (saved_features is not None and saved_features != LAP_FEATURES):
+        raise ValueError(
+            f"Saved LSTM model is incompatible with the current code: it was trained on "
+            f"{saved_input_size} features {saved_features or '(names not recorded)'}, but the code "
+            f"now uses {INPUT_SIZE} features {LAP_FEATURES}. "
+            f"Retrain with: python backend/scripts/train_lstm.py --force"
+        )
 
     model = TyreCliffLSTM(
         INPUT_SIZE, config["hidden_size"], NUM_LAYERS, DROPOUT_RATE

@@ -13,8 +13,8 @@
 import sys
 from pathlib import Path
 
-# Add parent to path for utils import
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pyarrow.parquet as pq
 

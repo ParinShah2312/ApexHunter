@@ -29,3 +29,6 @@ Thumbs.db
 
 # Sensitive Information (Placeholder for future)
 .env
+
+# Local assistant notes (not part of the submission)
+CLAUDE.md

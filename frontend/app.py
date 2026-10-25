@@ -116,49 +116,25 @@ def _get_session_time_range(df: pd.DataFrame) -> Tuple[float, float]:
 st.markdown(_DARK_THEME_CSS, unsafe_allow_html=True)
 
 
-import streamlit.components.v1 as components
-
-# ── Disable typing in selectboxes (JS injection) ──────────────────────────────
-components.html(
-    """
-    <script>
-    const doc = window.parent.document;
-
-    // Inject CSS into parent to hide the text cursor
-    const style = doc.createElement('style');
-    style.textContent = `
-        div[data-baseweb="select"] input {
-            caret-color: transparent !important;
-            cursor: pointer !important;
-        }
-    `;
-    doc.head.appendChild(style);
-
-    function lockSelects() {
-        doc.querySelectorAll('div[data-baseweb="select"] input').forEach(el => {
-            if (el._locked) return;
-            el._locked = true;
-
-            // 1. Make readonly
-            el.setAttribute('readonly', 'true');
-
-            // 2. Block typing (letters, numbers, space) and deletions
-            el.addEventListener('keydown', e => {
-                if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                }
-            }, true);
-        });
+# ── Dropdown keyboard lock ────────────────────────────────────────────────────
+# Every selectbox passes filter_mode=None, which stops typing, but Backspace/Delete still clear
+# the shown selection in Streamlit's dropdown. This blocks those two keys inside dropdowns.
+# st.html runs in the page itself (not an iframe), replacing the deprecated st.components.v1.html.
+_DROPDOWN_KEY_LOCK_JS: str = """
+<script>
+if (!window.__apexHunterDropdownLock) {
+  window.__apexHunterDropdownLock = true;
+  document.addEventListener("keydown", (e) => {
+    if ((e.key === "Backspace" || e.key === "Delete")
+        && e.target.closest && e.target.closest('div[data-baseweb="select"]')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
     }
-
-    lockSelects();
-    const observer = new MutationObserver(lockSelects);
-    observer.observe(doc.body, { childList: true, subtree: true });
-    </script>
-    """,
-    height=0
-)
+  }, true);
+}
+</script>
+"""
+st.html(_DROPDOWN_KEY_LOCK_JS, unsafe_allow_javascript=True)
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 from components.sidebar import render_sidebar
@@ -266,7 +242,7 @@ with tab1:
             if available_laps:
                 lap_options = [f"Lap {lap}" for lap in available_laps]
                 selected_lap_label = st.selectbox(
-                    "Select Lap", lap_options, key="mistake_lap_selector"
+                    "Select Lap", lap_options, key="mistake_lap_selector", filter_mode=None
                 )
                 selected_lap = available_laps[lap_options.index(selected_lap_label)]
                 df_mistakes_lap = df_mistakes[df_mistakes["LapNumber"] == selected_lap]

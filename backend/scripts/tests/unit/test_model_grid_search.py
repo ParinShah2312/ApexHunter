@@ -4,7 +4,7 @@ import logging
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 

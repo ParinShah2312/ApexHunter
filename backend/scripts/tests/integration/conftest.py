@@ -28,7 +28,6 @@ def run_pipeline_once() -> dict:
     tmp = Path(tempfile.mkdtemp())
 
     n = 500
-    rng = np.random.RandomState(42)
     speed = np.full(n, 250.0, dtype="float32")
     rpm = np.full(n, 10000.0, dtype="float32")
     throttle = np.full(n, 80.0, dtype="float32")
@@ -38,7 +37,7 @@ def run_pipeline_once() -> dict:
     # Inject anomalies at rows 200–210
     for i in range(200, 211):
         speed[i] = 20.0
-        brake[i] = 80.0
+        brake[i] = 1.0
         throttle[i] = 80.0
         ngear[i] = float((i % 2) + 1)
 

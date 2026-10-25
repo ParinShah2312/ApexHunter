@@ -1,4 +1,5 @@
-"""Unit tests for racing_line_io — output building, saving, and time computation."""
+"""Unit tests for racing_line/racing_line_io.py: loading, fastest-lap slicing, output building,
+time-saved estimate and saving."""
 
 import json
 import logging
@@ -6,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 
@@ -14,127 +16,112 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from racing_line.racing_line_grid import GridNode
 from racing_line.racing_line_io import (
-    build_output,
-    compute_time_saved,
-    load_and_validate,
-    save_output,
+    build_output, compute_time_saved, fetch_fastest_lap_bounds, load_and_validate, save_output,
 )
 from racing_line.racing_line_search import SearchResult
 
-
-class TestRacingLineIO(unittest.TestCase):
-    def setUp(self):
-        self.logger = logging.getLogger("test")
-        self.logger.setLevel(logging.CRITICAL)
-
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.temp_path = Path(self.temp_dir.name)
-
-        self.df = pd.DataFrame({
-            "Driver": ["44", "44", "1", "1"],
-            "X": [0.0, 10.0, 0.0, 10.0],
-            "Y": [0.0, 10.0, 0.0, 10.0],
-            "Speed": [100.0, 200.0, 150.0, 250.0],
-            "Brake": [0.0, 10.0, 0.0, 20.0],
-            "SessionTime": pd.to_timedelta([1, 2, 1, 2], unit="s")
-        })
-        self.valid_parquet = self.temp_path / "valid.parquet"
-        self.df.to_parquet(self.valid_parquet)
-
-        self.dummy_sr = SearchResult(
-            algorithm="astar",
-            path_keys=[(0, 0), (1, 1)],
-            path_coords=[(0.0, 0.0), (10.0, 10.0)],
-            total_cost=10.5,
-            nodes_expanded=5,
-            compute_time_s=0.1,
-            found=True
-        )
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
-
-    def test_load_and_validate_returns_df(self):
-        df_res = load_and_validate(self.valid_parquet, "44", self.logger)
-        self.assertIsInstance(df_res, pd.DataFrame)
-        self.assertGreater(len(df_res), 0)
-
-    def test_load_and_validate_filters_driver(self):
-        df_res = load_and_validate(self.valid_parquet, "44", self.logger)
-        self.assertTrue((df_res["Driver"] == "44").all())
-
-    def test_load_and_validate_missing_column_raises(self):
-        df_bad = self.df.drop(columns=["Brake"])
-        bad_parquet = self.temp_path / "bad.parquet"
-        df_bad.to_parquet(bad_parquet)
-        with self.assertRaises(ValueError):
-            load_and_validate(bad_parquet, "44", self.logger)
-
-    def test_load_and_validate_missing_driver_raises(self):
-        with self.assertRaises(ValueError):
-            load_and_validate(self.valid_parquet, "99", self.logger)
-
-    def test_build_output_has_all_keys(self):
-        data = build_output(
-            session_path="test.parquet",
-            driver="44",
-            grid_resolution=50.0,
-            circuit_length_km=5.0,
-            scale=0.1,
-            astar_result=self.dummy_sr,
-            dijkstra_result=self.dummy_sr,
-            bfs_result=self.dummy_sr,
-            astar_cost_bfs=15.0,
-            driver_path_coords=[(0.0, 0.0), (10.0, 10.0)],
-            deviation_per_corner=[],
-            n_corners=16
-        )
-
-        required_keys = [
-            "session_file", "driver", "grid_resolution", "circuit_length_km",
-            "coordinate_scale", "n_corners", "timestamp", "driver_path",
-            "algorithms", "deviation_per_corner"
-        ]
-        for key in required_keys:
-            self.assertIn(key, data)
-
-        self.assertIn("astar", data["algorithms"])
-        self.assertIn("dijkstra", data["algorithms"])
-        self.assertIn("bfs", data["algorithms"])
-
-        algo_keys = ["path", "cost", "nodes_expanded", "compute_time_s", "time_saved_s", "found"]
-        for algo in ["astar", "dijkstra", "bfs"]:
-            for k in algo_keys:
-                self.assertIn(k, data["algorithms"][algo])
-
-    def test_save_output_creates_file(self):
-        out_path = self.temp_path / "test.json"
-        save_output({"test": 1}, out_path, self.logger)
-        self.assertTrue(out_path.exists())
-
-    def test_save_output_is_valid_json(self):
-        out_path = self.temp_path / "test2.json"
-        save_output({"test": 1}, out_path, self.logger)
-        with open(out_path, "r") as f:
-            loaded = json.load(f)
-        self.assertEqual(loaded, {"test": 1})
-
-    def test_compute_time_saved_returns_float_or_none(self):
-        grid = {
-            (0, 0): GridNode(0, 0, 0.0, 0.0, 100.0, 0.0, 1.0, 1),
-            (1, 1): GridNode(1, 1, 10.0, 10.0, 100.0, 0.0, 1.0, 1)
-        }
-        driver_path = [(0.0, 0.0), (10.0, 10.0)]
-        result = compute_time_saved(self.dummy_sr, driver_path, grid, scale=0.1)
-        self.assertTrue(isinstance(result, float) or result is None)
-
-    def test_compute_time_saved_none_if_not_found(self):
-        grid = {}
-        driver_path = [(0.0, 0.0), (10.0, 10.0)]
-        sr_not_found = SearchResult("astar", [], [], 0.0, 0, 0.0, False)
-        result = compute_time_saved(sr_not_found, driver_path, grid, scale=0.1)
-        self.assertIsNone(result)
+LOG = logging.getLogger("test_racing_line_io")
+LOG.addHandler(logging.NullHandler())
+LOG.propagate = False
 
 
-if __name__ == '__main__':
+def _sr(coords, cost=1.0, found=True, name="astar") -> SearchResult:
+    return SearchResult(name, [(0, 0)] * len(coords), coords, cost, 7, 0.123456, found)
+
+
+class TestLoadAndValidate(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "s.parquet"
+        pd.DataFrame({
+            "Driver": ["44", "44", "1", "44"], "X": [0.0, 1.0, 2.0, 3.0], "Y": [0.0] * 4,
+            "Speed": [100.0] * 4, "Brake": [0.0] * 4,
+            "SessionTime": pd.to_timedelta([3, 1, 2, 2], unit="s"),
+        }).to_parquet(self.path)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_filters_driver_and_sorts_by_time(self) -> None:
+        df = load_and_validate(self.path, "44", LOG)
+        self.assertEqual(df["X"].tolist(), [1.0, 3.0, 0.0])          # ordered by SessionTime
+        self.assertEqual(list(df.index), [0, 1, 2])
+
+    def test_missing_column_raises(self) -> None:
+        pd.read_parquet(self.path).drop(columns=["Brake"]).to_parquet(self.path)
+        with self.assertRaisesRegex(ValueError, "Brake"):
+            load_and_validate(self.path, "44", LOG)
+
+    def test_unknown_driver_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "99"):
+            load_and_validate(self.path, "99", LOG)
+
+
+class TestFetchFastestLapBounds(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.df = pd.DataFrame({"Year": [2023] * 6, "Round": [1] * 6, "Session": ["Q"] * 6,
+                                "SessionTime": pd.to_timedelta(range(0, 60, 10), unit="s"), "X": range(6)})
+
+    def test_slices_to_fastest_lap(self) -> None:
+        session = mock.MagicMock()
+        session.laps.pick_drivers.return_value.pick_fastest.return_value = {
+            "LapStartTime": pd.Timedelta(seconds=10), "Time": pd.Timedelta(seconds=30)}
+        with mock.patch("fastf1.get_session", return_value=session) as get_session, \
+             mock.patch("racing_line.racing_line_io.enable_fastf1_cache"):
+            lap = fetch_fastest_lap_bounds(self.df, "1", LOG)
+        get_session.assert_called_once_with(2023, 1, "Q")
+        session.laps.pick_drivers.assert_called_once_with("1")
+        self.assertEqual(lap["X"].tolist(), [1, 2, 3])
+
+    def test_falls_back_to_full_session_on_failure(self) -> None:
+        with mock.patch("fastf1.get_session", side_effect=RuntimeError("offline")), \
+             mock.patch("racing_line.racing_line_io.enable_fastf1_cache"):
+            self.assertIs(fetch_fastest_lap_bounds(self.df, "1", LOG), self.df)
+
+
+class TestComputeTimeSaved(unittest.TestCase):
+    """All nodes run at 180 km/h (50 m/s), so time = path length (m) / 50."""
+
+    def setUp(self) -> None:
+        self.grid = {(i, 0): GridNode(i, 0, i * 50.0, 0.0, 180.0, 0.0, 1.0, 1) for i in range(30)}
+
+    def test_shorter_optimal_path_saves_time(self) -> None:
+        optimal = [(0.0, 0.0), (100.0, 0.0)]                       # 100 m → 2.0 s
+        driver = [(0.0, 0.0), (60.0, 0.0), (120.0, 0.0)]           # 120 m → 2.4 s
+        self.assertAlmostEqual(compute_time_saved(_sr(optimal), driver, self.grid, scale=1.0), 0.4)
+
+    def test_clamped_to_five_seconds(self) -> None:
+        optimal = [(0.0, 0.0), (100.0, 0.0)]                       # 2 s
+        driver = [(0.0, 0.0), (1000.0, 0.0)]                       # 20 s → 18 s, clamped
+        self.assertEqual(compute_time_saved(_sr(optimal), driver, self.grid, scale=1.0), 5.0)
+
+    def test_none_when_no_path(self) -> None:
+        self.assertIsNone(compute_time_saved(_sr([], found=False), [(0.0, 0.0)], self.grid, 1.0))
+
+
+class TestOutputs(unittest.TestCase):
+
+    def test_build_output_values(self) -> None:
+        a, d, b = _sr([(0.0, 0.0), (1.0, 1.0)], 3.33333), _sr([(0.0, 0.0)], 3.33333, name="dijkstra"), \
+            _sr([(0.0, 0.0)], 0.0, name="bfs")
+        data = build_output("s.parquet", "44", 50.0, 5.4, 0.3, a, d, b, 4.444449, [(1.0, 2.0)], [], 15)
+        self.assertEqual(data["driver_path"], [[1.0, 2.0]])
+        self.assertEqual(data["algorithms"]["astar"]["path"], [[0.0, 0.0], [1.0, 1.0]])
+        self.assertEqual(data["algorithms"]["astar"]["cost"], 3.3333)
+        self.assertEqual(data["algorithms"]["bfs"]["cost"], 4.4444)       # weighted cost, not BFS's 0
+        self.assertEqual(data["algorithms"]["dijkstra"]["compute_time_s"], 0.1235)
+        self.assertIsNone(data["algorithms"]["astar"]["time_saved_s"])    # filled in by the pipeline
+        self.assertEqual((data["n_corners"], data["coordinate_scale"]), (15, 0.3))
+
+    def test_save_output_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.json"
+            save_output({"a": [1, 2]}, path, LOG)
+            with open(path) as f:
+                self.assertEqual(json.load(f), {"a": [1, 2]})
+
+
+if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,6 @@ Renders the metrics row, time scrubber, and the five-panel telemetry chart.
 
 from typing import Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -22,10 +21,14 @@ def _get_time_col(df: pd.DataFrame) -> str:
 
 
 def _compute_brake_overlap(df: pd.DataFrame) -> float:
-    """Return percentage of rows where Brake > 0 AND Throttle > 0."""
+    """Return percentage of rows where the brake is on AND Throttle > 5%.
+
+    Brake is a binary on/off flag in FastF1; the 5% throttle threshold matches the
+    Isolation Forest brake_throttle_overlap feature and filters out pedal sensor noise.
+    """
     if len(df) == 0:
         return 0.0
-    return float(((df["Brake"] > 0) & (df["Throttle"] > 0)).sum() / len(df) * 100)
+    return float(((df["Brake"] >= 0.5) & (df["Throttle"] > 5)).sum() / len(df) * 100)
 
 
 def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
@@ -63,7 +66,7 @@ def _build_telemetry_figure(
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.04,
-        subplot_titles=("Speed (km/h)", "Throttle %", "Brake %", "Gear", "RPM"),
+        subplot_titles=("Speed (km/h)", "Throttle %", "Brake (on/off)", "Gear", "RPM"),
     )
 
     # Primary driver traces
@@ -72,8 +75,8 @@ def _build_telemetry_figure(
          "At <b>%{x:.1f}s</b>, the car was travelling at <b>%{y:.1f} km/h</b><extra></extra>"),
         (2, "Throttle", "#00ff88", "rgba(0,255,136,0.09)", "tozeroy", "lines", None,
          "At <b>%{x:.1f}s</b>, throttle was at <b>%{y:.0f}%</b><extra></extra>"),
-        (3, "Brake",    "#ff3a3a", "rgba(255,58,58,0.09)", "tozeroy", "lines", None,
-         "At <b>%{x:.1f}s</b>, brake pressure was <b>%{y:.0f}%</b><extra></extra>"),
+        (3, "Brake",    "#ff3a3a", "rgba(255,58,58,0.09)", "tozeroy", "lines", "hv",
+         "At <b>%{x:.1f}s</b>, brake was <b>%{y:.0f}</b> (1 = on, 0 = off)<extra></extra>"),
         (4, "nGear",    "#6b7890", None, None, "lines", "hv",
          "At <b>%{x:.1f}s</b>, the car was in <b>gear %{y:.0f}</b><extra></extra>"),
         (5, "RPM",      "#a855f7", None, None, "lines", None,

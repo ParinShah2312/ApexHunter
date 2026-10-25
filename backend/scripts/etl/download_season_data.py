@@ -10,13 +10,17 @@
 ================================================================================
 """
 
+import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
 import fastf1
 import pandas as pd
 
-from utils import CACHE_DIR, CONFIG, DATA_LAKE_DIR, setup_logger
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils import CACHE_DIR, CONFIG, DATA_LAKE_DIR, enable_fastf1_cache, setup_logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 logger = setup_logger(__name__)
@@ -28,8 +32,7 @@ SEASON_DATA_DIR: Path = DATA_LAKE_DIR / "season_data"
 def setup_directories() -> None:
     """Creates necessary directories for data storage and caching."""
     SEASON_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CACHE_DIR.mkdir(exist_ok=True)
-    fastf1.Cache.enable_cache(CACHE_DIR)
+    enable_fastf1_cache()
     logger.info(f"Data lake directory: {SEASON_DATA_DIR}")
     logger.info(f"Cache directory: {CACHE_DIR}")
 

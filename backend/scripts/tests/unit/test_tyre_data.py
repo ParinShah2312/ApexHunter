@@ -1,4 +1,5 @@
-"""Unit tests for tyre_data.py — stint detection and lap aggregation."""
+"""Unit tests for lstm/tyre_data.py: per-lap aggregation, training windows, stint rules and
+dataset building. (Lap filtering is covered in test_tyre_lap_filtering.py.)"""
 
 import logging
 import sys
@@ -11,136 +12,98 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from lstm.tyre_data import (
-    LAP_FEATURES,
-    SEQUENCE_LENGTH,
-    extract_stints,
-    build_training_dataset,
-)
+from lstm.tyre_data import LAP_FEATURES, SEQUENCE_LENGTH, build_training_dataset, extract_stints
+
+LAP_S = 10.0
+LOG = logging.getLogger("test_tyre_data")
+LOG.addHandler(logging.NullHandler())
+LOG.propagate = False
 
 
-def _silent_logger() -> logging.Logger:
-    """Return a logger that writes nowhere."""
-    lg = logging.getLogger("test_tyre_data_silent")
-    lg.handlers = [logging.NullHandler()]
-    lg.setLevel(logging.CRITICAL)
-    return lg
-
-
-def _build_synthetic_df() -> pd.DataFrame:
-    """Build a 2000-row DataFrame simulating two stints with a 120s gap.
-
-    Stint 1: rows 0–999, SessionTime from 0s to ~98s.
-    Gap: 120s between row 999 and 1000.
-    Stint 2: rows 1000–1999, continues after the gap.
-    Speed degrades linearly from 250 → 220 km/h.
-    """
-    n = 2000
-    # SessionTime: 0–98s for stint 1, then jump by 120s, then 0–98s for stint 2
-    times_s1 = np.linspace(0.0, 98.0, 1000)
-    gap = 120.0
-    times_s2 = np.linspace(times_s1[-1] + gap, times_s1[-1] + gap + 98.0, 1000)
-    times = np.concatenate([times_s1, times_s2])
-
-    speed = np.linspace(250.0, 220.0, n).astype("float32")
-
+def _laps(lap_numbers, compound="SOFT", stint=1) -> pd.DataFrame:
+    """Clean laps (no FastF1 flag columns → nothing filtered except lap 1)."""
     return pd.DataFrame({
-        "Driver": ["44"] * n,
-        "Speed": speed,
-        "Throttle": np.full(n, 70.0, dtype="float32"),
-        "Brake": np.full(n, 5.0, dtype="float32"),
-        "RPM": np.full(n, 9000.0, dtype="float32"),
-        "nGear": np.full(n, 5.0, dtype="float32"),
-        "SessionTime": pd.to_timedelta(times, unit="s"),
+        "LapNumber": [float(n) for n in lap_numbers], "Stint": [float(stint)] * len(lap_numbers),
+        "Compound": [compound] * len(lap_numbers), "TyreLife": [float(n + 2) for n in lap_numbers],
+        "LapStartTime": [pd.Timedelta(seconds=(n - 1) * LAP_S) for n in lap_numbers],
+        "Time": [pd.Timedelta(seconds=n * LAP_S) for n in lap_numbers],
+        "LapTime": [pd.Timedelta(seconds=LAP_S + 0.1 * n) for n in lap_numbers],
     })
 
 
-class TestConstants(unittest.TestCase):
-    """Tests for module-level constants and LAP_FEATURES contract."""
-
-    def test_sequence_length_positive(self) -> None:
-        self.assertGreater(SEQUENCE_LENGTH, 0)
-
-    def test_lap_features_is_non_empty_list(self) -> None:
-        self.assertIsInstance(LAP_FEATURES, list)
-        self.assertGreater(len(LAP_FEATURES), 0)
-
-    def test_lap_features_are_strings(self) -> None:
-        for feat in LAP_FEATURES:
-            self.assertIsInstance(feat, str)
-
-    def test_lap_features_no_duplicates(self) -> None:
-        self.assertEqual(len(LAP_FEATURES), len(set(LAP_FEATURES)))
+def _telemetry(last_lap: int, skip_lap: int = None) -> pd.DataFrame:
+    """10 samples per lap. Lap n has speed 300 - n, throttle 50 + n, brake on in 2 of 10
+    samples, RPM 10000 + n. Lap `skip_lap` gets only 2 samples (too sparse)."""
+    rows = []
+    for lap in range(1, last_lap + 1):
+        n_samples = 2 if lap == skip_lap else 10
+        for k in range(n_samples):
+            rows.append({"SessionTime": pd.Timedelta(seconds=(lap - 1) * LAP_S + 0.5 + k * 0.9),
+                         "Speed": 300.0 - lap, "Throttle": 50.0 + lap,
+                         "Brake": 1.0 if k < 2 else 0.0, "RPM": 10000.0 + lap})
+    return pd.DataFrame(rows)
 
 
-class TestExtractStintsEdgeCases(unittest.TestCase):
-    """Tests for extract_stints with edge-case inputs (no FastF1 dependency)."""
+class TestLapAggregation(unittest.TestCase):
 
-    def setUp(self) -> None:
-        self.logger = _silent_logger()
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.stint = extract_stints(_laps(range(1, 11), compound="MEDIUM"), _telemetry(10), LOG)[0]
+        cls.lf = pd.DataFrame(cls.stint["lap_features"])
 
-    def test_empty_driver_laps_returns_empty(self) -> None:
-        """extract_stints should return [] when driver_laps is empty."""
-        driver_laps = pd.DataFrame(columns=["LapNumber", "Stint", "LapStartTime", "Time", "Compound", "TyreLife", "LapTime"])
-        telemetry = pd.DataFrame(columns=["SessionTime", "Speed", "Throttle", "Brake", "RPM"])
-        result = extract_stints(driver_laps, telemetry, self.logger)
-        self.assertEqual(result, [])
+    def test_per_lap_features(self) -> None:
+        row = self.lf[self.lf["race_lap_number"] == 4.0].iloc[0]
+        self.assertAlmostEqual(row["mean_speed"], 296.0)
+        self.assertAlmostEqual(row["mean_throttle"], 54.0)
+        self.assertAlmostEqual(row["mean_brake"], 0.2)          # fraction of the lap braking
+        self.assertAlmostEqual(row["mean_rpm"], 10004.0)
+        self.assertAlmostEqual(row["tyre_age"], 6.0)            # from FastF1 TyreLife
+        self.assertEqual((row["is_soft"], row["is_medium"], row["is_hard"]), (0.0, 1.0, 0.0))
+        self.assertAlmostEqual(row["lap_time_seconds"], 10.4)
 
-    def test_insufficient_laps_returns_empty(self) -> None:
-        """extract_stints should return [] when stint has fewer laps than MIN_STINT_LAPS."""
-        from lstm.tyre_data import MIN_STINT_LAPS
-        # Create 1 lap (below threshold)
-        driver_laps = pd.DataFrame({
-            "LapNumber": [1],
-            "Stint": [1],
-            "LapStartTime": [pd.Timedelta(seconds=0)],
-            "Time": [pd.Timedelta(seconds=90)],
-            "Compound": ["SOFT"],
-            "TyreLife": [1.0],
-            "LapTime": [pd.Timedelta(seconds=90)],
-        })
-        telemetry = pd.DataFrame({
-            "SessionTime": pd.to_timedelta(np.linspace(0, 90, 100), unit="s"),
-            "Speed": np.full(100, 200.0),
-            "Throttle": np.full(100, 70.0),
-            "Brake": np.full(100, 5.0),
-            "RPM": np.full(100, 9000.0),
-        })
-        result = extract_stints(driver_laps, telemetry, self.logger)
-        self.assertEqual(result, [])
+    def test_windows_and_next_lap_targets(self) -> None:
+        # laps 2..10 are kept (lap 1 is the start) → 9 laps → 9 - 5 = 4 windows
+        self.assertEqual(self.stint["n_laps"], 9)
+        self.assertEqual(len(self.stint["sequences"]), 4)
+        first = self.stint["sequences"][0]
+        self.assertEqual(first.shape, (SEQUENCE_LENGTH, len(LAP_FEATURES)))
+        lap_col = LAP_FEATURES.index("race_lap_number")
+        np.testing.assert_array_equal(first[:, lap_col], [2, 3, 4, 5, 6])
+        self.assertAlmostEqual(self.stint["targets"][0], 300.0 - 7)  # mean speed of lap 7
 
-    def test_telemetry_too_sparse_skips_lap(self) -> None:
-        """Laps with < 5 telemetry rows should be skipped."""
-        driver_laps = pd.DataFrame({
-            "LapNumber": [1, 2, 3, 4],
-            "Stint": [1, 1, 1, 1],
-            "LapStartTime": [pd.Timedelta(seconds=i * 90) for i in range(4)],
-            "Time": [pd.Timedelta(seconds=(i + 1) * 90) for i in range(4)],
-            "Compound": ["MEDIUM"] * 4,
-            "TyreLife": [1.0, 2.0, 3.0, 4.0],
-            "LapTime": [pd.Timedelta(seconds=90)] * 4,
-        })
-        # Only 2 telemetry rows total — every lap will have < 5 rows
-        telemetry = pd.DataFrame({
-            "SessionTime": pd.to_timedelta([10, 100], unit="s"),
-            "Speed": [200.0, 210.0],
-            "Throttle": [70.0, 75.0],
-            "Brake": [5.0, 3.0],
-            "RPM": [9000.0, 9500.0],
-        })
-        result = extract_stints(driver_laps, telemetry, self.logger)
-        self.assertEqual(result, [])
+    def test_stint_index_zero_based(self) -> None:
+        self.assertEqual(self.stint["stint_index"], 0)
+
+
+class TestStintRules(unittest.TestCase):
+
+    def test_sparse_lap_is_skipped(self) -> None:
+        dense = extract_stints(_laps(range(1, 12)), _telemetry(11), LOG)[0]
+        sparse = extract_stints(_laps(range(1, 12)), _telemetry(11, skip_lap=11), LOG)[0]
+        self.assertIn(11.0, dense["lap_features"]["race_lap_number"])
+        self.assertNotIn(11.0, sparse["lap_features"]["race_lap_number"])
+        self.assertEqual(sparse["n_laps"], dense["n_laps"] - 1)
+
+    def test_stint_too_short_for_a_window_is_dropped(self) -> None:
+        # laps 2..6 = 5 laps: enough for a stint, but a window needs 5 inputs + 1 target
+        self.assertEqual(extract_stints(_laps(range(2, 7)), _telemetry(6), LOG), [])
+        self.assertEqual(len(extract_stints(_laps(range(2, 8)), _telemetry(7), LOG)), 1)
+
+    def test_each_stint_handled_separately(self) -> None:
+        laps = pd.concat([_laps(range(2, 10), "SOFT", stint=1), _laps(range(10, 18), "HARD", stint=2)])
+        stints = extract_stints(laps, _telemetry(17), LOG)
+        self.assertEqual([s["stint_index"] for s in stints], [0, 1])
+        self.assertEqual(stints[1]["lap_features"]["is_hard"][0], 1.0)
+
+    def test_empty_laps(self) -> None:
+        self.assertEqual(extract_stints(_laps([]), _telemetry(1), LOG), [])
 
 
 class TestBuildTrainingDataset(unittest.TestCase):
-    """Tests for build_training_dataset()."""
 
-    def setUp(self) -> None:
-        self.logger = _silent_logger()
-
-    def test_build_training_dataset_wrong_dir_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            build_training_dataset(Path("/nonexistent"), ["2024"], self.logger)
+    def test_no_race_files_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "No Race parquet files"):
+            build_training_dataset(Path("/nonexistent"), ["2024"], LOG)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,9 @@ from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import col, greatest, last, least, lit
 from pyspark.sql.types import FloatType
 
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from utils import DATA_LAKE_DIR, IST, setup_logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -174,7 +177,7 @@ def main() -> None:
             "Speed":    (0.0, 380.0),
             "RPM":      (0.0, 15000.0),
             "Throttle": (0.0, 100.0),
-            "Brake":    (0.0, 100.0),
+            "Brake":    (0.0, 1.0),       # Binary on/off flag in FastF1
         }
         for c, (lo, hi) in clips.items():
             if c in df.columns:

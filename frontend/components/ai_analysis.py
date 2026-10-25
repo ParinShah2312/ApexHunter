@@ -3,7 +3,7 @@ ApexHunter Frontend - AI Analysis
 Renders the AI Analysis tab with Isolation Forest panel (left) and LSTM placeholder (right).
 """
 
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,10 +14,30 @@ from components.data_loader import downsample
 
 
 
+def stint_lap_axis(stint: dict) -> Tuple[List[int], str]:
+    """Return (x values, axis title) for a stint chart.
+
+    Newer prediction files store the race lap number of every kept lap (non-representative laps
+    such as safety-car laps are skipped, so numbers can have gaps). Older files fall back to
+    1..n_laps "lap in stint".
+    """
+    if stint.get("lap_numbers"):
+        return list(stint["lap_numbers"]), "Race lap"
+    return list(range(1, stint["n_laps"] + 1)), "Lap in stint"
+
+
+def stint_cliff_label(stint: dict) -> Optional[str]:
+    """Human-readable cliff lap (race lap number when available), or None."""
+    cliff_lap = stint.get("cliff_lap")
+    if cliff_lap is None:
+        return None
+    lap_nums, _ = stint_lap_axis(stint)
+    return str(lap_nums[min(cliff_lap, len(lap_nums) - 1)])
+
+
 def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
     """Build the full tyre cliff Plotly figure for one stint."""
-    n_laps = stint["n_laps"]
-    lap_nums = list(range(1, n_laps + 1))
+    lap_nums, x_title = stint_lap_axis(stint)
     actual_time = stint["actual_laps"]
     predicted_time = stint["predicted_laps"]
     upper_time = stint["confidence_upper"]
@@ -79,7 +99,7 @@ def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
         fig.add_vline(
             x=cliff_x,
             line=dict(color="#ff3a3a", width=1.5, dash="dot"),
-            annotation_text=f"CLIFF LAP {cliff_lap + 1}",
+            annotation_text=f"CLIFF LAP {stint_cliff_label(stint)}",
             annotation_position="top right",
             annotation_font=dict(color="#ff3a3a", size=10),
         )
@@ -90,7 +110,7 @@ def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
         height=300,
         margin=dict(t=20, b=30, l=50, r=20),
         xaxis=dict(
-            title="Lap in stint",
+            title=x_title,
             tickfont=dict(color="#6b7890"),
             gridcolor="rgba(255,255,255,0.04)",
         ),
@@ -108,6 +128,17 @@ def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
     return fig
 
 
+def mistake_rate_pct(df: pd.DataFrame) -> float:
+    """Measured share of rows flagged as mistakes, in percent (0.0 for an empty frame).
+
+    This is the model's actual output rate. It is NOT the contamination hyperparameter, which is
+    only the threshold setting chosen during training.
+    """
+    if len(df) == 0:
+        return 0.0
+    return float(df["is_mistake"].sum()) / len(df) * 100
+
+
 def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: Optional[dict]) -> None:
     """Render the full Isolation Forest card including map, stats, and CV scores."""
     if df_mistakes is None or meta is None:
@@ -119,14 +150,13 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
 
     contamination = meta["best_contamination"]
     total_mistakes = int(df_mistakes["is_mistake"].sum())
-    total_rows = len(df_mistakes)
-    rate = (total_mistakes / total_rows * 100) if total_rows > 0 else 0.0
+    session_rate = mistake_rate_pct(df_mistakes)
     ref_name = DRIVER_MAPPING.get(meta["reference_driver"], meta["reference_driver"])
 
     st.markdown("**ISOLATION FOREST · Mistake Detection**")
     st.caption(
-        f"contamination={contamination:.3f} · {total_mistakes} anomalies "
-        f"({contamination:.3f}) · ref: {ref_name}"
+        f"Session: {total_mistakes} anomalies ({session_rate:.2f}% of samples) · "
+        f"contamination setting={contamination:.3f} · ref: {ref_name}"
     )
 
     # Lap selector — filter mistakes to a single lap
@@ -136,7 +166,7 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
         if available_laps:
             lap_options = [f"Lap {lap}" for lap in available_laps]
             selected_lap_label = st.selectbox(
-                "Select Lap", lap_options, key="ai_mistake_lap_selector"
+                "Select Lap", lap_options, key="ai_mistake_lap_selector", filter_mode=None
             )
             selected_lap = available_laps[lap_options.index(selected_lap_label)]
             df_display = df_mistakes[df_mistakes["LapNumber"] == selected_lap]
@@ -195,9 +225,9 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
         brake_override = int(
             (df_display["is_mistake"] & (df_display["brake_intensity"] > 0.5)).sum()
         )
-        st.metric("Brake Override", str(brake_override))
+        st.metric("Under Braking", str(brake_override))
     with s3:
-        st.metric("Mistake Rate", f"{contamination:.3f}")
+        st.metric("Mistake Rate", f"{mistake_rate_pct(df_display):.2f}%")
 
 
 
@@ -249,7 +279,7 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
         for s in stints
     ]
     selected_stint_label = st.selectbox(
-        "Select stint", options=stint_options, key="tyre_stint_selector"
+        "Select stint", options=stint_options, key="tyre_stint_selector", filter_mode=None
     )
     selected_idx = stint_options.index(selected_stint_label)
     stint = stints[selected_idx]
@@ -260,11 +290,10 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
     # Stat cards - 2x2 grid for better readability
     c1, c2 = st.columns(2)
     with c1:
-        cliff_lap = stint.get("cliff_lap")
-        cliff_label = str(cliff_lap + 1) if cliff_lap is not None else "—"
+        cliff_label = stint_cliff_label(stint)
         st.metric(
             "Predicted Cliff",
-            f"Lap {cliff_label}" if cliff_lap is not None else "—",
+            f"Lap {cliff_label}" if cliff_label is not None else "—",
         )
     with c2:
         lr = stint.get("laps_remaining")

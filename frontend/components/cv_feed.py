@@ -3,7 +3,6 @@ ApexHunter Frontend - CV Feed
 Renders the YOLO-processed video player, status badge, and CV stat cards.
 """
 
-import math
 from pathlib import Path
 from typing import List
 
@@ -11,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from config import PROCESSED_CSV_DIR, PROCESSED_VIDEO_DIR
-from components.data_loader import load_cv_metrics
+from components.data_loader import load_cv_metrics, load_turn_windows
 
 
 def _find_available_videos() -> List[Path]:
@@ -66,7 +65,7 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
         return
 
     selected_filename = st.selectbox(
-        "Select pole lap video", options=[f.name for f in mp4_files]
+        "Select pole lap video", options=[f.name for f in mp4_files], filter_mode=None
     )
 
     csv_name = selected_filename.replace("_HUD.mp4", "_metrics.csv")
@@ -102,8 +101,6 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
         wide = int((df_cv["status"] == "Wide Line").sum())
         missing = int((df_cv["status"] == "Missing Apex").sum())
         total_curb_frames = int(df_cv["has_curb"].sum())
-        closest_idx = (df_cv["timestamp_sec"] - video_scrub).abs().idxmin()
-        current_dist = df_cv.loc[closest_idx, "distance_cm"]
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -121,28 +118,16 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
         st.markdown("---")
         st.subheader("📋 Turn-by-Turn Report Card")
 
-        BAHRAIN_TURN_WINDOWS = [
-            (13.0, 16.0, "Right", "Slow", "Turn 1"),
-            (17.0, 19.0, "Left", "Medium", "Turn 2"),
-            (19.5, 20.5, "Right", "Medium", "Turn 3"),
-            (27.0, 29.0, "Right", "Medium", "Turn 4"),
-            (33.0, 34.0, "Left", "Fast", "Turn 5"),
-            (34.0, 36.0, "Right", "Fast", "Turn 6"),
-            (36.0, 38.0, "Left", "Fast", "Turn 7"),
-            (41.0, 43.0, "Right", "Slow", "Turn 8"),
-            (48.0, 50.0, "Left", "Fast", "Turn 9"),
-            (51.0, 53.0, "Left", "Slow", "Turn 10"),
-            (62.0, 67.0, "Left", "Fast", "Turn 11"),
-            (68.0, 71.0, "Right", "Fast", "Turn 12"),
-            (72.0, 77.0, "Right", "Fast", "Turn 13"),
-            (85.0, 87.0, "Right", "Slow", "Turn 14"),
-            (88.0, 90.0, "Right", "Medium", "Turn 15")
-        ]
+        turns = load_turn_windows(str(PROCESSED_CSV_DIR / selected_filename.replace("_HUD.mp4", "_turns.json")))
+        if turns is None:
+            st.info("No turn windows for this video. Re-run cv/run_inference.py with --video-offset "
+                    "to generate them from FastF1 circuit data.")
+            turns = []
 
         report_data = []
-        for start_t, end_t, direction, speed_cat, turn_name in BAHRAIN_TURN_WINDOWS:
+        for turn in turns:
             # Filter df_cv for this turn window
-            df_turn = df_cv[(df_cv['timestamp_sec'] >= start_t) & (df_cv['timestamp_sec'] <= end_t)]
+            df_turn = df_cv[(df_cv['timestamp_sec'] >= turn["start_s"]) & (df_cv['timestamp_sec'] <= turn["end_s"])]
             df_turn_valid = df_turn.dropna(subset=['distance_cm'])
 
             if not df_turn_valid.empty:
@@ -163,17 +148,18 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
                 dominant_status = "No Data"
 
             report_data.append({
-                "Turn": turn_name,
-                "Type": f"{direction} ({speed_cat})",
+                "Turn": turn["turn"],
+                "Type": f"{turn['direction']} ({turn['speed_category']})",
                 "Closest Proximity (cm)": f"{min_dist:.1f}" if not pd.isna(min_dist) else "-",
                 "Status": dominant_status
             })
 
-        st.dataframe(
-            pd.DataFrame(report_data),
-            width='stretch',
-            hide_index=True
-        )
+        if report_data:
+            st.dataframe(
+                pd.DataFrame(report_data),
+                width='stretch',
+                hide_index=True
+            )
 
     else:
         c1, c2, c3, c4 = st.columns(4)

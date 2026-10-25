@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from config import DRIVER_MAPPING
@@ -31,7 +30,7 @@ if str(_BACKEND_SCRIPTS_DIR) not in sys.path:
 try:
     from bigdata.mongo_manager import (  # type: ignore
         get_client, check_mongo_available,
-        get_mistake_leaderboard, get_anomaly_score_distribution,
+        get_mistake_leaderboard,
         get_session_summary, get_mistakes_by_driver,
     )
     from utils import DATA_LAKE_DIR  # type: ignore
@@ -134,24 +133,6 @@ def _fetch_leaderboard() -> List[Dict[str, Any]]:
         return get_mistake_leaderboard(client["apexhunter"])
     except Exception:
         return []
-
-
-@st.cache_data(ttl=30)
-
-
-def _fetch_anomaly_distribution() -> Dict[str, Any]:
-    """Fetch anomaly score distribution from MongoDB with 30s TTL cache.
-
-    Returns:
-        Dict with 'scores' key, or empty dict if unavailable.
-    """
-    if not MONGO_IMPORT_OK:
-        return {}
-    try:
-        client = get_client()
-        return get_anomaly_score_distribution(client["apexhunter"])
-    except Exception:
-        return {}
 
 
 # ── Section Renderers ─────────────────────────────────────────────────────────
@@ -448,7 +429,7 @@ def _render_mongo_section() -> None:
             if driver_list:
                 driver_labels = [f"{DRIVER_MAPPING.get(d, 'Unknown')} (#{d})" for d in driver_list]
                 label_to_num = dict(zip(driver_labels, driver_list))
-                sel_label = st.selectbox("Select Driver", driver_labels, key="bd_driver_select")
+                sel_label = st.selectbox("Select Driver", driver_labels, key="bd_driver_select", filter_mode=None)
                 sel = label_to_num.get(sel_label)
                 if sel:
                     rows = get_mistakes_by_driver(db, sel)

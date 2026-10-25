@@ -16,8 +16,15 @@
 ================================================================================
 """
 
-import random
 import shutil
+import sys
+from pathlib import Path
+from typing import List, TypeVar
+
+import numpy as np
+
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils import CONFIG, DATA_LAKE_DIR, setup_logger
 
@@ -29,7 +36,19 @@ OUTPUT_DIR = DATA_LAKE_DIR / "cv_dataset" / "upload_to_roboflow"
 FRAMES_PER_VIDEO = CONFIG.get("cv_frames", {}).get("frames_per_video", 11)  # ~11 frames × 46 videos ≈ 506 frames total
 SEASONS = CONFIG.get("seasons", ["2023", "2024"])
 
-random.seed(42)  # Reproducible selection
+T = TypeVar("T")
+
+
+def evenly_spaced(items: List[T], k: int) -> List[T]:
+    """Pick k items spread evenly over the whole list, always including the first and the last.
+
+    Returns every item if there are k or fewer. The selection is deterministic.
+    """
+    if len(items) <= k:
+        return list(items)
+    indices = np.linspace(0, len(items) - 1, k).round().astype(int)
+    return [items[i] for i in indices]
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def select_frames() -> None:
@@ -62,8 +81,7 @@ def select_frames() -> None:
 
             # Strategy: Pick frames evenly spread across the entire video
             # This ensures we get straights, corners, braking zones, tunnels, etc.
-            step = max(1, len(all_frames) // FRAMES_PER_VIDEO)
-            selected = all_frames[::step][:FRAMES_PER_VIDEO]
+            selected = evenly_spaced(all_frames, FRAMES_PER_VIDEO)
 
             logger.info(f"{video_name}: {len(all_frames)} total → selected {len(selected)} frames")
 

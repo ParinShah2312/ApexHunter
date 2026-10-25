@@ -14,15 +14,13 @@ import argparse
 import gc
 import sys
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import pandas as pd
 
-from lstm.tyre_data import LAP_FEATURES, extract_stints
+from lstm.tyre_data import extract_stints
 from lstm.tyre_io import build_prediction_output, load_model_artifacts, log_prediction_complete, save_prediction
-from lstm.tyre_model import INPUT_SIZE, monte_carlo_predict, predict_single_stint
-from utils import DATA_LAKE_DIR, PROJECT_ROOT, setup_logger
+from lstm.tyre_model import predict_single_stint
+from utils import DATA_LAKE_DIR, PROJECT_ROOT, enable_fastf1_cache, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -48,7 +46,7 @@ def main() -> None:
 
     try:
         model, scaler, config = load_model_artifacts(models_dir, logger)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         logger.error(str(e))
         sys.exit(1)
 
@@ -59,9 +57,7 @@ def main() -> None:
         parts = stem.split("_")
         year, round_num, session_type = int(parts[0]), int(parts[1]), parts[2]
         import fastf1
-        cache_dir = PROJECT_ROOT / "data_lake" / "cache"
-        cache_dir.mkdir(exist_ok=True)
-        fastf1.Cache.enable_cache(str(cache_dir))
+        enable_fastf1_cache()
         session_f1 = fastf1.get_session(year, round_num, session_type)
         session_f1.load(telemetry=False, weather=False)
         f1_laps = session_f1.laps

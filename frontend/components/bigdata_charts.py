@@ -6,8 +6,9 @@ import re
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
+
+from components.ai_analysis import stint_lap_axis
 
 _DARK_BG = "#0d1520"
 _PAPER = "rgba(0,0,0,0)"
@@ -287,7 +288,7 @@ def build_tyre_degradation_line(tyre_data: dict) -> go.Figure:
     pal = [_ACCENT, _PURPLE, _GREEN, _ORANGE, _RED]
     fig = go.Figure()
     for i, s in enumerate(stints):
-        laps = list(range(1, s["n_laps"]+1))
+        laps, x_title = stint_lap_axis(s)
         c = pal[i % len(pal)]
         fig.add_trace(go.Scatter(x=laps, y=s["actual_laps"], mode="lines+markers",
             name=f"Stint {i+1} Actual", line=dict(color=c, width=2), marker=dict(size=4),
@@ -296,11 +297,11 @@ def build_tyre_degradation_line(tyre_data: dict) -> go.Figure:
             name=f"Stint {i+1} LSTM", line=dict(color=c, width=1.5, dash="dash"),
             hovertemplate=f"Stint {i+1} LSTM<br>Lap %{{x}}<br>Predicted: %{{y:.2f}}s<extra></extra>"))
         if s.get("cliff_lap") is not None:
-            fig.add_vline(x=s["cliff_lap"]+1, line=dict(color=_RED, dash="dot", width=1),
+            fig.add_vline(x=laps[min(s["cliff_lap"], len(laps) - 1)], line=dict(color=_RED, dash="dot", width=1),
                 annotation_text=f"Cliff S{i+1}", annotation_font=dict(color=_RED, size=9))
     fig.update_layout(paper_bgcolor=_PAPER, plot_bgcolor=_DARK_BG, height=320,
         margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
-        xaxis=dict(title="Lap in Stint", gridcolor=_GRID),
+        xaxis=dict(title=x_title, gridcolor=_GRID),
         yaxis=dict(title="Lap Time (s)", gridcolor=_GRID),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=9, color="#6b7890")))
     return fig
@@ -314,7 +315,7 @@ def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
     if not stints:
         return go.Figure()
     s = stints[0]  # first stint
-    laps = list(range(1, s["n_laps"]+1))
+    laps, x_title = stint_lap_axis(s)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=laps+laps[::-1],
         y=s["confidence_upper"]+s["confidence_lower"][::-1],
@@ -328,7 +329,7 @@ def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
         hovertemplate="Lap %{x}<br>Actual: %{y:.2f}s<extra></extra>"))
     fig.update_layout(paper_bgcolor=_PAPER, plot_bgcolor=_DARK_BG, height=280,
         margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
-        xaxis=dict(title="Lap", gridcolor=_GRID), yaxis=dict(title="Lap Time (s)", gridcolor=_GRID),
+        xaxis=dict(title=x_title, gridcolor=_GRID), yaxis=dict(title="Lap Time (s)", gridcolor=_GRID),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10, color="#6b7890")))
     return fig
 

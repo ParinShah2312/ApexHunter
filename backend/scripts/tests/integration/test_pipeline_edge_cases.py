@@ -53,23 +53,17 @@ class TestPipelineEdgeCases(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run_pipeline(str(path), "99", None, self.output_dir, True)
 
-    def test_empty_driver_data_after_filter(self):
-        df = _make_df(100, "1")
-        path = Path(self.tmp) / "test.parquet"
-        df.to_parquet(path)
-        with self.assertRaises(SystemExit):
-            run_pipeline(str(path), "44", None, self.output_dir, True)
-
     def test_single_row_driver(self):
         df_single = _make_df(1, "44")
         df_ref = _make_df(50, "1", speed=280.0)
         combined = pd.concat([df_single, df_ref], ignore_index=True)
         path = Path(self.tmp) / "test.parquet"
         combined.to_parquet(path)
-        try:
-            run_pipeline(str(path), "44", None, self.output_dir, True)
-        except SystemExit:
-            pass
+        run_pipeline(str(path), "44", None, self.output_dir, True)
+        out = pd.read_parquet(self.output_dir / "test_44_mistakes.parquet")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out["Driver"].tolist(), ["44"])
+        self.assertTrue(np.isfinite(out["anomaly_score"].iloc[0]))
 
     def test_missing_required_column(self):
         df = _make_df(100, "44").drop(columns=["Brake"])

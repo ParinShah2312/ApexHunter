@@ -10,7 +10,7 @@ import fastf1
 import numpy as np
 import pandas as pd
 
-from utils import setup_logger
+from utils import enable_fastf1_cache, setup_logger
 
 logger = setup_logger(__name__)
 
@@ -29,29 +29,77 @@ LAP_FEATURES: List[str] = [
 ]
 CLIFF_SPEED_DROP_KMH: float = 2.0
 
+# FastF1 TrackStatus codes: 1 green, 2 yellow, 4 safety car, 5 red flag, 6 VSC, 7 VSC ending.
+# A lap's TrackStatus string lists every status seen during it (e.g. "126").
+# Yellow flags are local and barely affect pace, so only SC / red / VSC laps are excluded.
+NEUTRALISED_TRACK_STATUS: Tuple[str, ...] = ("4", "5", "6", "7")
+
+
+def representative_lap_mask(laps: pd.DataFrame) -> pd.Series:
+    """Return a boolean mask of laps that reflect genuine racing pace on the current tyres.
+
+    Excluded: lap 1 (standing start), out-laps (PitOutTime set), in-laps (PitInTime set),
+    laps run under safety car / VSC / red flag, deleted or FastF1-generated laps, laps without
+    a lap time, and laps FastF1 marks as inaccurately timed. Columns that are absent are
+    ignored, so plain DataFrames with a subset of FastF1's columns are accepted.
+    """
+    mask = pd.Series(True, index=laps.index)
+    if "LapNumber" in laps.columns:
+        mask &= laps["LapNumber"] > 1
+    for col in ("PitOutTime", "PitInTime"):
+        if col in laps.columns:
+            mask &= laps[col].isna()
+    if "TrackStatus" in laps.columns:
+        status = laps["TrackStatus"].fillna("").astype(str)
+        for code in NEUTRALISED_TRACK_STATUS:
+            mask &= ~status.str.contains(code, regex=False)
+    for col in ("Deleted", "FastF1Generated"):
+        if col in laps.columns:
+            mask &= ~laps[col].astype("boolean").fillna(False).astype(bool)
+    if "IsAccurate" in laps.columns:
+        mask &= laps["IsAccurate"].astype("boolean").fillna(False).astype(bool)
+    if "LapTime" in laps.columns:
+        mask &= laps["LapTime"].notna()
+    return mask
+
+
+def _consecutive_runs(lap_numbers: pd.Series) -> List[np.ndarray]:
+    """Split positional indices into runs where lap numbers increase by exactly 1."""
+    values = lap_numbers.to_numpy()
+    breaks = np.where(np.diff(values) != 1)[0] + 1
+    return np.split(np.arange(len(values)), breaks)
+
 
 def extract_stints(
     driver_laps: pd.DataFrame, telemetry: pd.DataFrame, logger: logging.Logger
 ) -> List[dict]:
     """Segment a driver's session into individual tyre stints and aggregate lap-level features.
 
-    A new stint is defined when the Compound or Stint number changes.
+    Stints come from FastF1's Stint column. Only representative laps are used (see
+    representative_lap_mask); training windows are built only from runs of consecutive
+    representative laps, so a window never bridges a removed lap (e.g. a safety-car period).
 
     Args:
         driver_laps: FastF1 laps DataFrame for a single driver.
-        telemetry: Cleaned 10Hz telemetry for that driver.
+        telemetry: Cleaned telemetry for that driver.
         logger: Logger instance.
 
     Returns:
-        List of dicts, where each dict represents a stint and contains:
-        - stint_index: int, index of the stint
-        - compound: str, tyre compound
-        - lap_features: List[dict], lap-level aggregated features
+        List of dicts, one per stint with at least one training window:
+        - stint_index: int, 0-based stint index
+        - n_laps: int, number of representative laps kept
+        - cliff_lap: int or None, first kept lap whose speed dropped CLIFF_SPEED_DROP_KMH below the first
+        - lap_features: dict of lists, per-lap aggregated features (incl. race_lap_number)
+        - sequences / targets: training windows and next-lap mean-speed targets
     """
     stint_results = []
 
     # Sort laps just in case
     driver_laps = driver_laps.sort_values("LapNumber")
+    keep = representative_lap_mask(driver_laps)
+    if (~keep).any():
+        logger.debug(f"Excluded {int((~keep).sum())}/{len(driver_laps)} non-representative laps")
+    driver_laps = driver_laps[keep]
 
     for stint_num, stint_laps in driver_laps.groupby("Stint"):
         lap_feature_list = []
@@ -101,14 +149,16 @@ def extract_stints(
                 cliff_lap = i
                 break
 
-        # Build sliding window sequences
+        # Build sliding windows (5 input laps + 1 target lap) within each run of consecutive laps
         sequences = []
         targets = []
-        for i in range(len(lap_features_df) - SEQUENCE_LENGTH):
-            window = lap_features_df.iloc[i : i + SEQUENCE_LENGTH][LAP_FEATURES].values
-            target = lap_features_df["mean_speed"].iloc[i + SEQUENCE_LENGTH]
-            sequences.append(window)
-            targets.append(float(target))
+        for run in _consecutive_runs(lap_features_df["race_lap_number"]):
+            run_df = lap_features_df.iloc[run]
+            for i in range(len(run_df) - SEQUENCE_LENGTH):
+                window = run_df.iloc[i : i + SEQUENCE_LENGTH][LAP_FEATURES].values
+                target = run_df["mean_speed"].iloc[i + SEQUENCE_LENGTH]
+                sequences.append(window)
+                targets.append(float(target))
 
         if len(sequences) > 0:
             stint_results.append({
@@ -171,15 +221,34 @@ def _process_single_file(
     return X_list, y_list
 
 
+def session_sort_key(file_path: Path) -> Tuple[int, int]:
+    """Return (year, round) parsed from a '{year}_{round}_{session}.parquet' filename.
+
+    Sorting by this key gives true chronological order; plain string sorting would put
+    round 10 before round 2.
+    """
+    parts = file_path.stem.split("_")
+    return int(parts[0]), int(parts[1])
+
+
 def build_training_dataset(
     sessions_dir: Path,
     seasons: List[str],
     logger: logging.Logger,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Aggregate sequences and targets across all sessions in the given seasons."""
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Aggregate sequences and targets across all Race sessions in the given seasons.
+
+    Sessions are processed in chronological order, so later rows of X come from later races.
+
+    Returns:
+        Tuple of (X, y, groups). groups[i] is the chronological index of the session that
+        sequence i came from; use it to split data by whole sessions, because neighbouring
+        sliding windows share laps and would leak between train and test.
+    """
     files = []
     for year in seasons:
         files += list(sessions_dir.glob(f"{year}_*_R.parquet"))
+    files.sort(key=session_sort_key)
 
     logger.info(f"Found {len(files)} Race parquet files for training.")
     if len(files) == 0:
@@ -187,15 +256,15 @@ def build_training_dataset(
 
     all_sequences = []
     all_targets = []
+    all_groups = []
 
-    cache_dir = sessions_dir.parent.parent / "cache"
-    cache_dir.mkdir(exist_ok=True)
-    fastf1.Cache.enable_cache(str(cache_dir))
+    enable_fastf1_cache()
 
-    for filepath in files:
+    for session_idx, filepath in enumerate(files):
         X_file, y_file = _process_single_file(filepath, logger)
         all_sequences.extend(X_file)
         all_targets.extend(y_file)
+        all_groups.extend([session_idx] * len(X_file))
         gc.collect()
 
     if len(all_sequences) == 0:
@@ -203,5 +272,6 @@ def build_training_dataset(
 
     X = np.array(all_sequences, dtype=np.float32)
     y = np.array(all_targets, dtype=np.float32)
+    groups = np.array(all_groups, dtype=np.int64)
     logger.info(f"Training dataset: {len(X)} sequences from {len(files)} Race sessions.")
-    return (X, y)
+    return (X, y, groups)

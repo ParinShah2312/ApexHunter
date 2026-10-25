@@ -12,6 +12,7 @@ import subprocess
 import concurrent.futures
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -33,7 +34,9 @@ def run_file(test_file: Path, slow: bool = False) -> dict:
 
     start = time.time()
     result = subprocess.run(
-        ["python", "-m", "unittest", module_path, "-v"],
+        # sys.executable, not "python": on Windows a bare "python" can resolve to the base
+        # interpreter instead of the project venv, silently testing against the wrong packages
+        [sys.executable, "-m", "unittest", module_path, "-v"],
         capture_output=True,
         text=True,
         env=env,
@@ -89,13 +92,13 @@ def run_all(include_slow: bool = False, specific_file: str = None):
     print(f"  {passed}/{len(results)} files passed in {total_elapsed:.2f}s")
 
     if failed:
-        print(f"\n  FAILURES:\n")
+        print("\n  FAILURES:\n")
         for r in failed:
             print(f"  -- {r['file']} --")
             print(r["stderr"][-2000:])
         return 1
     else:
-        print(f"  All tests passed.\n")
+        print("  All tests passed.\n")
         return 0
 
 

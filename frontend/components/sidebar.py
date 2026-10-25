@@ -6,7 +6,7 @@ and returns the user's selections.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -21,7 +21,7 @@ from config import (
     RACING_LINES_DIR,
     TYRE_PREDICTIONS_DIR,
 )
-from components.data_loader import get_event_schedule, load_session_data, load_mistake_data
+from components.data_loader import get_event_schedule, load_session_data
 
 
 @dataclass
@@ -127,7 +127,7 @@ def render_sidebar() -> SidebarSelections:
     # Year
     year_idx = _get_default_index("sel_year", AVAILABLE_YEARS)
     selected_year = st.sidebar.selectbox(
-        "Year", AVAILABLE_YEARS, index=year_idx, key="sel_year"
+        "Year", AVAILABLE_YEARS, index=year_idx, key="sel_year", filter_mode=None
     )
 
     available_files = list(DATA_LAKE_DIR.glob(f"{selected_year}_*.parquet"))
@@ -141,7 +141,7 @@ def render_sidebar() -> SidebarSelections:
     # Session
     session_idx = _get_default_index("sel_session", session_options)
     selected_session = st.sidebar.selectbox(
-        "Session", session_options, index=session_idx, key="sel_session"
+        "Session", session_options, index=session_idx, key="sel_session", filter_mode=None
     )
 
     session_filepath = str(file_mapping[selected_session])
@@ -159,7 +159,7 @@ def render_sidebar() -> SidebarSelections:
 
     driver_idx = _get_default_index("sel_driver", driver_labels)
     selected_driver_label = st.sidebar.selectbox(
-        "Driver", driver_labels, index=driver_idx, key="sel_driver"
+        "Driver", driver_labels, index=driver_idx, key="sel_driver", filter_mode=None
     )
 
     if selected_driver_label is None:
@@ -178,7 +178,6 @@ def render_sidebar() -> SidebarSelections:
     mistake_meta_path = paths["mistake_meta"]
     racing_line_json = paths["racing_line"]
     tyre_prediction_path = paths["tyre_prediction"]
-    output_stem = f"{Path(session_filepath).stem}_{driver_number}"
 
     # ── AI Models Status ──────────────────────────────────────────────────
     st.sidebar.markdown("---")

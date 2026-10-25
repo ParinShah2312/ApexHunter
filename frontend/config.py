@@ -90,14 +90,3 @@ TEAM_MAPPING = {
     "77": "Kick Sauber",
     "81": "McLaren",
 }
-
-# ── Color constants ───────────────────────────────────────────────────────────
-COLOR_CYAN   = "#00d4ff"
-COLOR_GREEN  = "#00ff88"
-COLOR_RED    = "#ff3a3a"
-COLOR_AMBER  = "#ffb800"
-COLOR_PURPLE = "#a855f7"
-COLOR_MUTED  = "#6b7890"
-COLOR_BG     = "#0a0c0f"
-COLOR_PANEL  = "#1a2030"
-COLOR_BORDER = "#ffffff12"

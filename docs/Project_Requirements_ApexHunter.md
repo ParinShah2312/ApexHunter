@@ -1,142 +1,104 @@
-# Artificial Intelligence Project Requirements
+# ApexHunter 2.0 — Project Requirements
 
-**Course:** AI, Cloud and Big Data  
-**Academic Year:** 2023-2024 (or Current Year)  
+**Courses:** Data Science & Machine Learning · Deep Learning
+**Academic Year:** 2026–2027
 
 ## Project Group Details
 
-| Sr. No. | Enrolment Number(s) | Student Name(s) |
+| Sr. No. | Enrolment Number | Student Name |
 | :--- | :--- | :--- |
 | 1 | 23001091 | Parin Shah |
-| 2 | | |
-| 3 | | |
-| 4 | | |
+| 2 | 23000936 | Ayush Parikh |
+| 3 | 23001119 | Malav Joshi |
 
-*Based on the nature of data (Alphanumeric Tabular, Text (labeled, unlabeled), Images or Videos (labeled, unlabeled)) in your project you may choose appropriate techniques.*
+*Based on the nature of data (alphanumeric tabular, text, images or videos) you may choose appropriate techniques.*
 
-**Nature of Data used in ApexHunter 2.0:** 
-- **Tabular:** FastF1 Telemetry data (Parquet formats) 
-- **Images and Videos:** Onboard pole lap videos (MP4) and extracted CV frames (JPG/PNG).
+**Nature of data used in ApexHunter 2.0:**
+- **Tabular:** FastF1 telemetry, 92 sessions (2023–2024 qualifying and races), ~57.9M rows, Parquet.
+- **Lap-level tabular:** FastF1 lap metadata (lap times, stints, compounds, tyre life).
+- **Video / images:** 46 onboard pole-lap videos (MP4) and 21,282 extracted frames, of which 506 were
+  annotated with segmentation masks.
+
+> The previous semester's version of this document (AI & Big Data) is preserved in
+> `docs/32_Ayush_Parin_AI_Prj_Specs.pdf/.docx`.
 
 ---
 
 ## 1. Problem Definition
-- **Explicitly define a problem:** 
-  The problem is to analyze Formula 1 driver telemetry combined with visual apex detection to evaluate a driver's cornering precision. The goal is to ingest gigabytes of raw FastF1 data, process it, run a computer vision model to detect track curbs (apexes), and calculate a "Perfect Corner Score" based on how well the driver avoids overlapping brake and throttle applications.
-- **Write steps involved:** 
-  1. Fetch FastF1 telemetry and onboard pole lap videos.
-  2. Run ETL pipeline to clean and clip telemetry data.
-  3. Extract frames from onboard videos at 5fps.
-  4. Annotate frames and train a YOLOv11-Seg model.
-  5. Run inference on lap videos to detect apexes and deviation metrics.
-  6. Serve results via an interactive Streamlit dashboard equipped with WebGL track maps and telemetry charts.
+- **Problem:** Measure Formula 1 driving quality from telemetry and onboard video. That means
+  (a) automatically flagging unusual driving moments, (b) forecasting when tyre pace drops off
+  within a stint, (c) measuring how close the car gets to each apex curb, and (d) comparing the
+  driver's line with a cost-optimal path through their own telemetry.
+- **Steps:**
+  1. Download FastF1 telemetry and onboard pole-lap videos.
+  2. Clean and validate the telemetry (pandas, with an equivalent Spark job).
+  3. Engineer features and train an Isolation Forest for anomaly (mistake) detection.
+  4. Aggregate laps into stint sequences and train an LSTM for next-lap pace prediction.
+  5. Extract and annotate video frames; fine-tune YOLOv11-Seg for curb/road segmentation.
+  6. Run segmentation inference to measure apex distance per frame.
+  7. Run A\*, Dijkstra and BFS on a telemetry-weighted grid.
+  8. Present everything in a Streamlit dashboard.
 
----
+## 2. Data Collection Methods
+- **Secondary data:** FastF1 API (official F1 timing feed), saved as Parquet.
+- **Web scraping / crawling:** onboard videos with `yt-dlp`; satellite tiles from Esri via `staticmap` (10-thread pool).
+- **Sensors / IoT:** N/A (car sensor data is consumed indirectly through FastF1).
+- **Images / videos:** 46 videos trimmed to the lap, frames extracted at 5 fps, 506 selected for annotation.
+- **Survey / interview:** N/A.
 
-## 2. Data Collection Methods (Tabular, Text and Image)
-- **Primary / Secondary data : CSV, JSON or SQL Dumps from repositories:** 
-  Secondary Data: Fetching F1 telemetry data via the `FastF1` API (saved as Parquet files).
-- **Web scrapping / Crawling:** 
-  Extracting onboard lap videos via `yt-dlp` from YouTube and scraping circuit satellite images using parallel threading.
-- **Sensors / IOT:** 
-  N/A
-- **Images or Videos:** 
-  Onboard pole lap videos downloaded and trimmed, from which ~500 diverse frames were extracted to build a custom computer vision dataset.
-- **Survey, Interview:** 
-  N/A
+## 3. Data Exploration
+- **Visualisation:** interactive Plotly time series (speed, throttle, brake, gear, RPM), speed-coloured track maps, per-driver speed histograms, Speed–RPM scatter by gear, correlation heatmap.
+- **Shape of data:** ~420k rows per qualifying session and ~800k per race (20 drivers); median sampling interval ≈ 0.13 s; 15 columns after cleaning.
+- **Missing values:** forward-filled within the session; rows missing all core channels are dropped.
+- **EDA findings:** `Brake` is a binary on/off flag, not a pressure. Throttle occasionally exceeds 100 %. Speed and RPM are tied to gear in clear bands.
 
----
+## 4. Data Pre-Processing
+- **Cleaning:** drop empty packets, forward-fill, clip Speed/RPM/Throttle/Brake to physical limits, downcast to float32 (`etl/clean_telemetry.py`, `bigdata/spark_clean_telemetry.py`).
+- **Feature engineering:**
+  - Isolation Forest: 7 row-level features (normalised speed/throttle/RPM, binary brake flag, brake–throttle overlap, speed delta, gear change).
+  - LSTM: 9 lap-level features (mean speed/throttle/brake/RPM, tyre age, one-hot compound, lap number), computed only on representative laps (no race start, pit, or safety-car/VSC/red-flag laps).
+  - CV: inner-edge curb contour and wheel-to-curb Euclidean distance.
+- **Outliers:** domain clipping; speed delta clipped to ±50 km/h and gear change to 0–4 inside the features.
+- **Encodings:** one-hot encoding of tyre compound (soft/medium/hard).
+- **Scaling / normalisation:** fixed physical-range normalisation for Isolation Forest features; `StandardScaler` for LSTM inputs and z-normalisation of the LSTM target.
+- **Augmentation (images):** Roboflow flips, crops, colour/brightness shifts and small rotations (506 → 1,281 training images).
 
-## 3. Data Exploration (Tabular, Text and Image)
-- **Visualize the dataset:** 
-  Visualized speed, throttle, and brake telemetry over time using interactive Plotly subplots. Visualized spatial coordinates mapping circuit layouts using scatter plots.
-- **Check shape of data:** 
-  Explored rows and columns of Parquet files to understand sampling rates of telemetry (e.g., matching distance and time indices). 
-- **Treating missing values:** 
-  Interpolating missing telemetry data points where signal drops occur.
-- **EDA (only in tabular data):** 
-  Analyzed overlapping brake and throttle zones to design the gamified "Perfect Corner Score" metric. Evaluated apex timing in relation to speed telemetry.
+## 5. Data Splitting
+- **Isolation Forest:** 5-fold `KFold` cross-validation for contamination selection.
+- **LSTM:** chronological split by whole race sessions: the latest 10 % of sessions are the test set, and the latest 20 % of the remaining sessions are validation. Scalers are fitted on training sessions only.
+- **YOLO:** Roboflow train/validation split (1,281 / 226 images).
 
----
+## 6. Model Selection
+- **Classification:** N/A.
+- **Regression:** LSTM sequence regression (next-lap mean speed).
+- **Clustering:** N/A.
+- **Dimensionality reduction:** N/A.
+- **Anomaly detection:** Isolation Forest (unsupervised).
+- **Deep learning:**
+  - **LSTM**, 2 stacked layers with dropout, for tyre-degradation forecasting.
+  - **YOLOv11-Seg**, CNN instance segmentation, for curb/road masks.
+- **Search / optimisation:** A\*, Dijkstra and BFS racing-line search.
+- **Pre-trained with fine-tuning:** YOLOv11-Seg from COCO weights. The LSTM and Isolation Forest are trained from scratch.
 
-## 4. Data Pre-Processing (Tabular, Text and Image)
-- **Data Cleaning:** 
-  Removing unwanted lap segments, filtering out outlier telemetry coordinates, and smoothing traces using custom Python routines (`clean_telemetry.py`).
-- **Feature selection and engineering:** 
-  Engineered features like "Apex Deviation" by matching YOLO bounding box centroids to visual references, and combining brake/throttle percentages into a unified performance score.
-- **Treating Missing values and outlier detection and its treatment:** 
-  Clipping outlier coordinates during extraction to prevent skewed track maps. 
-- **Encodings and Embeddings:** 
-  N/A
-- **Scaling and Normalization:** 
-  Normalized distance and telemetry parameters across different tracks for uniform dashboard rendering.
-- **Data Augmentation, Data Orientation (images):** 
-  Used Roboflow for YOLO dataset preparation, applying augmentation techniques (e.g., flips, cropping, color shifts) to make the model robust against various tracks and lighting conditions.
+## 7. Model Training
+- **Optimise weights:** LSTM uses Adam + MSE loss, 20 epochs per search configuration and 50 for the final model, batch 32. YOLO was trained on a Google Colab T4 GPU.
+- **Cross-validation:** 5-fold CV over Isolation Forest contamination values.
+- **Overfitting:** 0.3 dropout between LSTM layers and best-validation tracking; Roboflow augmentation for YOLO.
 
----
+## 8. Model Evaluation
+- **Isolation Forest:** mean |decision function| on held-out folds; mistake rate; flagged points inspected on the track map.
+- **LSTM:** test MAE in km/h (retraining with the corrected pipeline pending), also median AE, max AE and RMSE; Monte Carlo dropout confidence bands.
+- **YOLOv11-Seg:** mAP50 / mAP50-95 (box and mask) from the Colab run; per-frame apex-status distribution on the processed lap.
+- **Racing line:** path cost, nodes expanded and runtime, compared across A\*, Dijkstra and BFS.
 
-## 5. Data Splitting (Tabular, Text and Image)
-- **Train-Test Split:** 
-  N/A
-- **Train, Validation, Test split:** 
-  The raw extracted YOLO image dataset was uploaded to Roboflow and split into Train, Validation, and Test sets to evaluate the segmentation model's generalizability on unseen corners.
-
----
-
-## 6. Model Selection (Tabular, Text and Image)
-- **Classification:** N/A
-- **Regression:** N/A
-- **Clustering:** N/A
-- **Dimensionality Reduction:** N/A
-- **Deep Learning:** 
-  - **YOLOv11-Seg:** Selected for real-time computer vision inference to detect track curbs and racing apexes.
-  - **LSTM (Long Short-Term Memory):** Recurrent Neural Network for "Tyre Cliff" forecasting, predicting performance drops based on historic stint telemetry.
-- **Model Selection (Additional):** 
-  - **Isolation Forest:** An unsupervised anomaly detection algorithm used for "Driver Mistake Detection" by flagging deviations in brake and throttle telemetry compared to a reference pole lap.
-- **Recommendation System:** N/A
-- **Specify if pre-trained model is used with fine tuning:** 
-  - **YOLOv11-Seg:** Fine-tuned on a custom F1 dataset from pre-trained COCO weights.
-  - **LSTM & Isolation Forest:** Built and trained from scratch using the processed FastF1 telemetry dataset.
-
----
-
-## 7. Model Training (Tabular, Text and Image)
-- **Optimize weights:** 
-  - Trained YOLOv11-Seg on a T4 GPU (Google Colab).
-  - LSTM weights optimized using Adam optimizer and Mean Squared Error (MSE) loss function.
-- **Cross Validation:** 
-  - K-Fold cross-validation (if applicable) for the Isolation Forest to ensure consistent anomaly detection across different drivers.
-- **Overfitting issues (Dropout, Regularization):** 
-  - Added Dropout layers to the LSTM architecture to prevent overfitting on specific track layouts.
-  - Used Roboflow augmentations (flips, color shifts) for the YOLO model.
-
----
-
-## 8. Model Evaluation as per data and techniques used.
-- **YOLOv11-Seg:** Evaluated using mAP50 and mAP50-95 for mask/box accuracy.
-- **Isolation Forest:** Evaluated using Anomaly Scores; validated by cross-referencing flagged timestamps with onboard video footage of mistakes (lock-ups/slides).
-- **LSTM:** Evaluated using Mean Absolute Error (MAE) between predicted lap times and actual recorded lap times.
-
----
-
-## 9. Parameter Tuning Methods
-- **GridSearchCV:** 
-  Used to find the optimal `contamination` parameter for the Isolation Forest mistake detector.
-- **RandomSearchCV:** 
-  Used to tune LSTM hyperparameters (number of hidden units, learning rate).
-- **Bayesian Optimization:** 
-  Optional YOLO hyperparameter evolution to maximize detection mAP.
-
----
+## 9. Parameter Tuning
+- **Grid search + K-fold CV:** Isolation Forest contamination ∈ {0.005, 0.01, 0.015, 0.02, 0.03, 0.05}.
+- **Grid search (validation set):** LSTM hidden size × learning rate, 6 configurations.
+- **YOLO:** Ultralytics default training configuration.
 
 ## 10. Model Deployment
-- **Streamlit:** 
-  The frontend (`app.py`) integrates all model outputs:
-  - **Track Map:** Color-coded GPS points highlighting mistakes detected by the Isolation Forest.
-  - **Predictive Chart:** An "Estimated Tyre Life" graph showing the LSTM-predicted "cliff" point.
-  - **CV HUD:** Streamed video showing YOLO apex detection markers.
-- **Flask, Docker, ML Flow:** N/A
-- **CI/CD pipelines:** N/A
-- **Kubernetes:** N/A
-- **AWS, Azure, GCP:** 
-  Google Colab (GCP) used for GPU-accelerated training of YOLO and LSTM models.
+- **Streamlit** dashboard (`frontend/app.py`) with Race Intelligence, Telemetry, AI Analysis, Racing Line and Big Data tabs.
+- **Flask, Docker, MLflow, CI/CD, Kubernetes:** N/A.
+- **Cloud:** Google Colab GPU for YOLO training.
+
+See `docs/PROJECT_DOCUMENTATION.md` §8 for current limitations.

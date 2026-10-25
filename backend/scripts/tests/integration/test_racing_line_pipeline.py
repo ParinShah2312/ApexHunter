@@ -31,6 +31,7 @@ def run_pipeline_once():
     temp_path = Path(temp_dir.name)
 
     n_rows = 1000
+    rng = np.random.RandomState(42)
     t = np.linspace(0, 6 * np.pi, n_rows)  # 3 laps
     x = np.cos(t) * 3000.0
     y = np.sin(t) * 1500.0
@@ -39,8 +40,8 @@ def run_pipeline_once():
         "Driver": ["44"] * n_rows,
         "X": x.astype(np.float32),
         "Y": y.astype(np.float32),
-        "Speed": np.random.uniform(100, 300, n_rows).astype(np.float32),
-        "Brake": np.random.uniform(0, 30, n_rows).astype(np.float32),
+        "Speed": rng.uniform(100, 300, n_rows).astype(np.float32),
+        "Brake": rng.randint(0, 2, n_rows).astype(np.float32),
         "SessionTime": pd.to_timedelta(np.linspace(0, 270, n_rows), unit="s")
     })
     session_file = temp_path / "synthetic_session.parquet"
@@ -110,15 +111,16 @@ class TestRacingLinePipeline(unittest.TestCase):
         dijkstra_start = self.data["algorithms"]["dijkstra"]["path"][0]
         self.assertEqual(astar_start, dijkstra_start)
 
-    def test_astar_cost_le_dijkstra_cost(self):
+    def test_astar_cost_equals_dijkstra_cost(self):
         a_cost = self.data["algorithms"]["astar"]["cost"]
         d_cost = self.data["algorithms"]["dijkstra"]["cost"]
         self.assertLess(abs(a_cost - d_cost), 0.01)
 
-    def test_bfs_nodes_expanded_gte_astar(self):
-        bfs_nodes = self.data["algorithms"]["bfs"]["nodes_expanded"]
-        astar_nodes = self.data["algorithms"]["astar"]["nodes_expanded"]
-        self.assertGreaterEqual(bfs_nodes, astar_nodes)
+    def test_bfs_path_never_cheaper_than_astar(self):
+        # A* is optimal for the weighted cost, so BFS (which ignores costs) can only tie or lose.
+        # (Nodes expanded is NOT ordered: on real Bahrain data BFS expanded fewer nodes than A*.)
+        self.assertGreaterEqual(self.data["algorithms"]["bfs"]["cost"],
+                                self.data["algorithms"]["astar"]["cost"] - 1e-6)
 
     def test_deviation_per_corner_correct_length(self):
         self.assertEqual(len(self.data["deviation_per_corner"]), self.data["n_corners"])
@@ -135,7 +137,7 @@ class TestRacingLinePipeline(unittest.TestCase):
     def test_force_overwrites(self):
         mtime_before = self.output_path.stat().st_mtime
         import time
-        time.sleep(0.01)  # Ensure time ticks forward for mtime resolution in some OS
+        time.sleep(1.1)  # filesystem mtime resolution can be up to 1 s
 
         args_force = argparse.Namespace(**vars(self.args))
         args_force.force = True

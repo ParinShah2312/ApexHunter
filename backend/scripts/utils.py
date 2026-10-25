@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 from pathlib import Path
 
 # ── Timezone ──────────────────────────────────────────────────────────────────
@@ -27,6 +27,41 @@ DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def enable_fastf1_cache() -> Path:
+    """Point FastF1 at the single project cache (PROJECT_ROOT/cache) and return its path.
+
+    Every backend script that calls FastF1 must use this. Without it FastF1 silently falls back
+    to its own OS-level default directory, so downloads are duplicated outside the project.
+    fastf1 is imported lazily because most scripts that import utils never need it.
+    """
+    import fastf1
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    fastf1.Cache.enable_cache(str(CACHE_DIR))
+    return CACHE_DIR
+
+
+class _SafeStreamHandler(logging.StreamHandler):
+    """StreamHandler that never loses a log line to the stream's encoding.
+
+    When stdout is redirected on Windows it uses cp1252, which cannot encode characters such as
+    '→'; the standard handler then prints a "Logging error" traceback and drops the message.
+    Here unencodable characters are replaced (shown as '?') instead.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            text = self.format(record) + self.terminator
+            try:
+                self.stream.write(text)
+            except UnicodeEncodeError:
+                encoding = getattr(self.stream, "encoding", None) or "ascii"
+                self.stream.write(text.encode(encoding, errors="replace").decode(encoding))
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 def setup_logger(name: str) -> logging.Logger:
     """Sets up a standardized logger for backend scripts."""
     logger = logging.getLogger(name)
@@ -36,7 +71,7 @@ def setup_logger(name: str) -> logging.Logger:
         logger.setLevel(logging.INFO)
 
         # Create console handler
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = _SafeStreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
 
         # Define formatter

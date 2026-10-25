@@ -1,9 +1,10 @@
-"""Unit tests for racing_line_grid — grid construction and adjacency graph."""
+"""Unit tests for racing_line/racing_line_grid.py: grid cells, node cost, adjacency,
+nearest-node lookup, coordinate scale and start/end selection."""
 
+import math
 import sys
 import unittest
 from pathlib import Path
-from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -12,93 +13,97 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from racing_line.racing_line_grid import (
-    build_grid,
-    compute_node_weight,
-    build_adjacency,
-    get_nearest_node,
-    compute_coordinate_scale,
-    find_start_end_nodes,
-    GridNode
+    DIAGONAL_COST_FACTOR, GridNode, build_adjacency, build_grid, compute_coordinate_scale,
+    compute_node_weight, find_start_end_nodes, get_nearest_node,
 )
 
 
-class TestRacingLineGrid(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Create a synthetic DataFrame with 500 rows
-        n_rows = 500
-        cls.df = pd.DataFrame({
-            "X": np.linspace(0, 5000, n_rows, dtype=np.float32),
-            "Y": np.sin(np.linspace(0, 4 * np.pi, n_rows)) * 500,
-            "Speed": np.random.uniform(100, 300, n_rows).astype(np.float32),
-            "Brake": np.random.uniform(0, 30, n_rows).astype(np.float32),
-            "SessionTime": pd.to_timedelta(np.linspace(0, 90, n_rows), unit="s"),
-            "Driver": ["44"] * n_rows
+def _node(i: int, j: int, weight: float = 1.0) -> GridNode:
+    return GridNode(i, j, i * 50.0, j * 50.0, 200.0, 0.0, weight, 1)
+
+
+class TestBuildGrid(unittest.TestCase):
+
+    def test_cells_aggregate_their_samples(self) -> None:
+        df = pd.DataFrame({
+            "X": [0.0, 10.0, 60.0, 70.0, 80.0], "Y": [0.0, 20.0, 0.0, 0.0, 49.0],
+            "Speed": [100.0, 200.0, 300.0, 300.0, 300.0], "Brake": [1.0, 0.0, 0.0, 0.0, 1.0],
         })
-        cls.df["Y"] = cls.df["Y"].astype(np.float32)
+        grid = build_grid(df, resolution=50.0)
+        self.assertEqual(set(grid), {(0, 0), (1, 0)})
+        a, b = grid[(0, 0)], grid[(1, 0)]
+        self.assertEqual((a.point_count, b.point_count), (2, 3))
+        self.assertAlmostEqual(a.mean_speed, 150.0)
+        self.assertAlmostEqual(a.mean_brake, 0.5)                 # 1 of 2 samples braking
+        self.assertAlmostEqual(b.center_x, 70.0)
+        self.assertAlmostEqual(b.center_y, 49.0 / 3)
+        self.assertAlmostEqual(a.weight, compute_node_weight(150.0, 0.5))
 
-    def test_build_grid_returns_dict(self):
-        grid = build_grid(self.df)
-        self.assertIsInstance(grid, dict)
-        self.assertGreater(len(grid), 0)
 
-    def test_build_grid_all_nodes_have_weight(self):
-        grid = build_grid(self.df)
-        for node in grid.values():
-            self.assertGreater(node.weight, 0.0)
+class TestNodeWeight(unittest.TestCase):
 
-    def test_build_grid_resolution_affects_size(self):
-        grid_coarse = build_grid(self.df, resolution=500.0)
-        grid_fine = build_grid(self.df, resolution=50.0)
-        self.assertGreater(len(grid_fine), len(grid_coarse))
+    def test_formula(self) -> None:
+        # 1 - speed/380 + 2 * brake_fraction
+        self.assertAlmostEqual(compute_node_weight(190.0, 0.0), 0.5)
+        self.assertAlmostEqual(compute_node_weight(190.0, 0.5), 1.5)
+        self.assertAlmostEqual(compute_node_weight(0.0, 1.0), 3.0)
 
-    def test_compute_node_weight_high_speed_low_cost(self):
-        w1 = compute_node_weight(350.0, 0.0)
-        w2 = compute_node_weight(100.0, 80.0)
-        self.assertLess(w1, w2)
+    def test_floor_and_brake_clip(self) -> None:
+        self.assertEqual(compute_node_weight(380.0, 0.0), 0.01)  # never zero/negative
+        self.assertEqual(compute_node_weight(200.0, 5.0), compute_node_weight(200.0, 1.0))
 
-    def test_compute_node_weight_never_zero(self):
-        w = compute_node_weight(380.0, 0.0)
-        self.assertGreater(w, 0.0)
 
-    def test_build_adjacency_returns_dict(self):
-        grid = build_grid(self.df)
+class TestAdjacency(unittest.TestCase):
+
+    def test_neighbours_and_edge_costs(self) -> None:
+        grid = {(0, 0): _node(0, 0, 1.0), (1, 0): _node(1, 0, 3.0), (1, 1): _node(1, 1, 2.0),
+                (5, 5): _node(5, 5)}                               # isolated cell
         adj = build_adjacency(grid)
-        self.assertIsInstance(adj, dict)
-        self.assertGreater(len(adj), 0)
-
-    def test_build_adjacency_max_8_neighbors(self):
-        grid = build_grid(self.df)
-        adj = build_adjacency(grid)
-        for neighbors in adj.values():
-            self.assertLessEqual(len(neighbors), 8)
-
-    def test_build_adjacency_edge_costs_positive(self):
-        grid = build_grid(self.df)
-        adj = build_adjacency(grid)
-        for neighbors in adj.values():
-            for _, cost in neighbors:
-                self.assertGreater(cost, 0.0)
-
-    def test_get_nearest_node_finds_closest(self):
-        grid = build_grid(self.df)
-        keys = list(grid.keys())
-        target = keys[len(keys) // 2]
-        result = get_nearest_node(grid, target[0], target[1])
-        self.assertEqual(result, target)
-
-    def test_compute_coordinate_scale_returns_float(self):
-        scale = compute_coordinate_scale(self.df, 5.412)
-        self.assertIsInstance(scale, float)
-        self.assertGreaterEqual(scale, 0.001)
-        self.assertLessEqual(scale, 1.0)
-
-    def test_find_start_end_different(self):
-        grid = build_grid(self.df)
-        adj = build_adjacency(grid)
-        start, end = find_start_end_nodes(grid, self.df, 50.0, adj)
-        self.assertNotEqual(start, end)
+        self.assertEqual(dict(adj[(0, 0)]), {(1, 0): 2.0, (1, 1): 1.5 * DIAGONAL_COST_FACTOR})
+        self.assertEqual(dict(adj[(1, 0)]), {(0, 0): 2.0, (1, 1): 2.5})
+        self.assertNotIn((5, 5), adj)
 
 
-if __name__ == '__main__':
+class TestNearestNode(unittest.TestCase):
+
+    def test_off_grid_target_snaps_to_closest_cell(self) -> None:
+        grid = {(0, 0): _node(0, 0), (10, 0): _node(10, 0), (10, 10): _node(10, 10)}
+        self.assertEqual(get_nearest_node(grid, 9, 2), (10, 0))
+        self.assertEqual(get_nearest_node(grid, 2, 1), (0, 0))
+
+    def test_empty_grid_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            get_nearest_node({}, 0, 0)
+
+
+class TestCoordinateScale(unittest.TestCase):
+
+    def test_known_circle(self) -> None:
+        """One 90 s lap around a 10,000-unit circle for a 5 km circuit → 0.5 m per unit."""
+        t = np.linspace(0, 2 * math.pi, 5001)
+        r = 10_000 / (2 * math.pi)
+        df = pd.DataFrame({"X": r * np.cos(t), "Y": r * np.sin(t),
+                           "SessionTime": pd.to_timedelta(np.linspace(0, 90, len(t)), unit="s")})
+        self.assertAlmostEqual(compute_coordinate_scale(df, 5.0), 0.5, places=3)
+
+
+class TestStartEndNodes(unittest.TestCase):
+
+    def test_start_uses_same_grid_origin_as_build_grid(self) -> None:
+        """Regression for #17: a slow pit-lane stretch to the left (connected to the track) sets
+        the grid origin; the start must be the cell of the first fast sample under that origin."""
+        pit_x = np.arange(-500.0, 0.0, 10.0)
+        pit = pd.DataFrame({"X": pit_x, "Y": np.zeros_like(pit_x), "Speed": 5.0, "Brake": 0.0})
+        lap_x = np.arange(0.0, 1000.0, 10.0)
+        lap = pd.DataFrame({"X": lap_x, "Y": np.zeros_like(lap_x), "Speed": 200.0, "Brake": 0.0})
+        df = pd.concat([pit, lap], ignore_index=True)
+        df["SessionTime"] = pd.to_timedelta(np.arange(len(df)), unit="s")
+
+        grid = build_grid(df, 50.0)
+        start, end = find_start_end_nodes(grid, df, 50.0, build_adjacency(grid))
+        self.assertEqual(start, (10, 0))      # x = 0 is 500 units = 10 cells from origin -500
+        self.assertEqual(end, (29, 0))        # furthest cell of the connected track
+
+
+if __name__ == "__main__":
     unittest.main()

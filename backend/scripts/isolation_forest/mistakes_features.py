@@ -10,8 +10,8 @@ import pandas as pd
 MAX_SPEED_KMH: float = 380.0
 MAX_RPM: float = 15000.0
 MAX_THROTTLE_PCT: float = 100.0
-MAX_BRAKE_PCT: float = 100.0
-PEDAL_NOISE_THRESHOLD: float = 5.0      # minimum pedal % to consider meaningful
+BRAKE_ON_THRESHOLD: float = 0.5         # FastF1 Brake is a binary flag (0 = off, 1 = on)
+PEDAL_NOISE_THRESHOLD: float = 5.0      # minimum throttle % to consider meaningful
 SPEED_DELTA_CLIP: float = 50.0          # max row-to-row speed change to allow
 GEAR_CHANGE_CLIP: float = 4.0           # max gear skip before treating as artifact
 
@@ -42,10 +42,13 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     features["throttle_intensity"] = (df["Throttle"] / MAX_THROTTLE_PCT).astype("float32")
 
-    features["brake_intensity"] = (df["Brake"] / MAX_BRAKE_PCT).astype("float32")
+    brake_on = df["Brake"] >= BRAKE_ON_THRESHOLD
+
+    # Brake has no pressure information, so "intensity" is the on/off flag itself (0.0 or 1.0)
+    features["brake_intensity"] = brake_on.astype("float32")
 
     features["brake_throttle_overlap"] = (
-        (df["Brake"] > PEDAL_NOISE_THRESHOLD) & (df["Throttle"] > PEDAL_NOISE_THRESHOLD)
+        brake_on & (df["Throttle"] > PEDAL_NOISE_THRESHOLD)
     ).astype("float32")
 
     features["speed_delta"] = (

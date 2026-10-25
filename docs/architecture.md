@@ -1,31 +1,50 @@
-# 🏗️ ApexHunter Architecture Design
+# 🏗️ ApexHunter 2.0 — Architecture Overview
 
-ApexHunter utilizes a simplified **Big Data Pipeline Architecture** emphasizing the separation of concern between data harvesting, cleaning, and serving.
+ApexHunter keeps data collection, data preparation, modelling and presentation apart. Each stage
+reads files written by the previous stage, so any stage can be re-run on its own, and the dashboard
+keeps working when external APIs or services are offline.
 
-## The ETL Flow
+```
+FastF1 API ─► season_data/ ─► clean_data/ ─┬─► Isolation Forest ─► mistake_data/ ──┐
+                                           ├─► A*/Dijkstra/BFS ─► racing_lines/ ───┤
+                         FastF1 laps ─────►├─► LSTM ───────────► tyre_predictions/ ┼─► Streamlit
+YouTube ─► edited_videos/ ─► cv_frames/ ─► YOLOv11-Seg ─► processed_video/ + csv/ ─┘    dashboard
+```
 
-### 1. Extract (Data Harvest)
-**Component:** `backend/scripts/download_season_data.py`
-**Trigger:** Manual (via Terminal)
+## 1. Extract
+**`backend/scripts/etl/download_season_data.py`** (`python backend/scripts/etl/download_season_data.py`). It loops seasons → rounds → Q/R sessions, pulls per-driver telemetry with
+FastF1, and writes one Parquet per session to `data_lake/season_data/`. Existing files are skipped
+and API calls are cached in `cache/`.
 
-This script interfaces with the `FastF1` public API. It operates hierarchically by looping through full F1 Seasons -> Specific Rounds -> Specific Qualifying and Race sessions. Features extracted include driver lap timings, positional metrics (X,Y,Z coordinates), and granular vehicle sensor telemetry (RPM, Speed, Throttle, Brake, Gear). 
-**Output Location:** `data_lake/season_data/` (Raw Parquet Data Pool)
+Videos come from `etl/download_manual_videos.py` (yt-dlp) and are trimmed by hand into
+`edited_videos/`. Satellite images come from `etl/download_satellite_images.py`.
 
-### 2. Transform (Data Cleaning & Normalization)
-**Component:** `backend/scripts/clean_telemetry.py`
-**Trigger:** Manual (via Terminal)
+## 2. Transform
+**`etl/clean_telemetry.py`** (pandas) and its Spark counterpart
+**`bigdata/spark_clean_telemetry.py`** both:
+1. drop rows whose Speed, RPM, X and Y are all missing,
+2. forward-fill gaps in numeric columns,
+3. clip values to physical limits (Speed ≤ 380 km/h, RPM ≤ 15,000, pedals 0–100),
+4. downcast to float32 and write `data_lake/clean_data/`.
 
-Because telemetry sensors attached to F1 cars occasionally drop packets going over curbs or passing grandstands, the raw `season_data` cache is inherently dirty. 
-The ETL script:
-1. **Filters:** Drops any dataframe rows that contain entirely empty location or speed metrics.
-2. **Imputes/Interpolates:** Forward-fills (ffill) any microscopic gaps during a stint where only *one* sensor packet failed to record.
-3. **Clips Extreme Outliers:** Failsafes numerical scales. Even anomalous glitches cannot register a car travelling at `800 km/h` on the dashboard because our threshold cap is set to a realistic `380 km/h`.
+For video, `cv/extract_frames.py` samples frames at 5 fps and `cv/select_training_frames.py` picks
+the 506 frames used for annotation.
 
-**Output Location:** `data_lake/clean_data/` (Processed Parquet Layer)
+## 3. Model
+| Stage | Entry point | Output |
+|---|---|---|
+| Isolation Forest (DSML) | `detect_mistakes.py` | `mistake_data/*_mistakes.parquet` + `_meta.json` |
+| Racing-line search (DSML) | `optimal_line.py` | `racing_lines/*_racing_line.json` |
+| LSTM tyre cliff (DL) | `train_lstm.py`, `predict_cliff.py` | `models/tyre_*`, `tyre_predictions/*_tyre.json` |
+| YOLOv11-Seg apex detection (DL) | `cv/run_inference.py` (+ `cv/extract_turns.py` for FastF1 corner windows) | `processed_video/*_HUD.mp4`, `processed_csv/*_metrics.csv`, `processed_csv/*_turns.json` |
 
-### 3. Load & Serve (Dashboard Frontend)
-**Component:** `frontend/app.py`
-**Trigger:** Interactive Web Service (via Streamlit run)
+## 4. Store (optional infrastructure)
+`bigdata/hdfs_manager.py` mirrors the Parquet layers to HDFS. `bigdata/mongo_manager.py` stores
+mistake summaries and session metadata in MongoDB. Both write JSON status files to `data_lake/`
+for the dashboard.
 
-This represents the User Interface payload. 
-By delegating the Extract and Transform loads to the `backend/scripts`, the visualization layer operates extremely quickly. It only consumes pre-validated, clean `.parquet` files from the central `clean_data` lake. This separation means the Streamlit frontend cannot break even if the `FastF1` APIs go down entirely.
+## 5. Serve
+**`frontend/app.py`** (`streamlit run frontend/app.py`) reads only from `data_lake/` and `models/`
+outputs, plus FastF1 lap metadata from the local cache. Loads are cached with `@st.cache_data`.
+
+See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for details and current limitations.

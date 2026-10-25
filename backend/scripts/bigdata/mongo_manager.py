@@ -26,7 +26,9 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+
+# Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils import DATA_LAKE_DIR, IST, setup_logger
 
@@ -377,25 +379,6 @@ def get_mistake_leaderboard(db: Any) -> List[Dict[str, Any]]:
          "mean_anomaly_score": 1, "total_rows": 1, "_id": 0},
     )
     return sorted(list(cursor), key=lambda x: (x.get("mistake_rate_pct") or 0), reverse=True)
-
-
-def get_anomaly_score_distribution(db: Any) -> Dict[str, List[float]]:
-    """Return the distribution of mean anomaly scores across all annotations.
-
-    Args:
-        db: A pymongo Database instance for the apexhunter database.
-
-    Returns:
-        Dict with a single key "scores" containing a list of float values.
-    """
-    coll = db["mistake_annotations"]
-    cursor = coll.find({}, {"mean_anomaly_score": 1, "_id": 0})
-    scores = [
-        doc.get("mean_anomaly_score")
-        for doc in cursor
-        if doc.get("mean_anomaly_score") is not None
-    ]
-    return {"scores": scores}
 
 
 def get_session_summary(db: Any) -> Dict[str, Any]:

@@ -19,8 +19,6 @@ RIGHT_WHEEL_X_PCT: float = _inf_config.get("right_wheel_x_pct", 0.85)
 WHEEL_Y_PCT: float = _inf_config.get("wheel_y_pct", 0.60)
 
 
-STRAIGHT_THRESHOLD: int = _inf_config.get("straight_threshold", 400)
-
 def get_closest_distance(
     ref_point: Tuple[int, int], contour: Any
 ) -> Tuple[float, Optional[Tuple[int, int]]]:
@@ -81,52 +79,22 @@ def extract_inner_edge(contour: Any, turn_direction: str) -> Any:
     return filtered_contour
 
 
-# Exact video timestamp windows for Bahrain 2023 corners (provided by user)
-# Format: (start_time, end_time, direction, speed_category)
-BAHRAIN_TURN_WINDOWS = [
-    (13.0, 16.0, "Right", "Slow"),    # Turn 1: Tight hairpin after straight
-    (17.0, 19.0, "Left", "Medium"),   # Turn 2
-    (19.5, 20.5, "Right", "Medium"),  # Turn 3
-    (27.0, 29.0, "Right", "Medium"),  # Turn 4
-    (33.0, 34.0, "Left", "Fast"),     # Turn 5: Fast sweeper
-    (34.0, 36.0, "Right", "Fast"),    # Turn 6: Fast sweeper
-    (36.0, 38.0, "Left", "Fast"),     # Turn 7: Fast sweeper
-    (41.0, 43.0, "Right", "Slow"),    # Turn 8: Hairpin
-    (48.0, 50.0, "Left", "Medium"),   # Turn 9
-    (51.0, 53.0, "Left", "Slow"),     # Turn 10: Tight, heavy braking
-    (62.0, 67.0, "Left", "Medium"),   # Turn 11
-    (68.0, 71.0, "Right", "Fast"),    # Turn 12: Fast flat-out
-    (72.0, 77.0, "Right", "Medium"),  # Turn 13
-    (85.0, 87.0, "Right", "Slow"),    # Turn 14: Tight entry
-    (88.0, 90.0, "Right", "Medium")   # Turn 15
-]
-
-def get_turn_context(timestamp_sec: float) -> Tuple[str, str]:
-    """Return the hardcoded turn direction and speed category for the current timestamp.
-
-    Returns:
-        Tuple of (turn_direction, speed_category). Defaults to ('-', 'Medium') on straights.
-    """
-    for start_t, end_t, direction, speed_cat in BAHRAIN_TURN_WINDOWS:
-        if start_t <= timestamp_sec <= end_t:
-            return direction, speed_cat
-    return "-", "Medium"
-
 def classify_apex_status(
-    distance_px: float, has_curb: bool, timestamp_sec: float
+    distance_px: float, has_curb: bool, turn_direction: str, speed_cat: str
 ) -> Tuple[str, Tuple[int, int, int]]:
-    """Determine the apex hitting status based on distance and dynamic speed windows.
+    """Determine the apex hitting status from the curb distance and the current corner.
 
     Args:
         distance_px: Pixel distance from front wheel to the optimal racing line or curb.
         has_curb: True if an apex curb mask was detected in the frame.
-        timestamp_sec: Current timestamp of the video frame in seconds.
+        turn_direction: "Left"/"Right" inside a corner window, "-" on a straight
+            (see cv.extract_turns.turn_context_at).
+        speed_cat: "Slow", "Medium" or "Fast" for the current corner.
 
     Returns:
         Tuple of (Status String, BGR Color Tuple).
     """
-    turn_dir, speed_cat = get_turn_context(timestamp_sec)
-    in_turn = (turn_dir != "-")
+    in_turn = (turn_direction != "-")
 
     if not in_turn:
         return "Straight", (200, 200, 200)

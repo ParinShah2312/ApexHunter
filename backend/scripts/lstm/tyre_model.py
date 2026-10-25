@@ -1,10 +1,12 @@
 """LSTM architecture and training loop for the ApexHunter tyre cliff predictor.
 Handles model definition, hyperparameter search, training, and evaluation."""
 
+import copy
 import gc
 import logging
+import math
 import time
-from typing import List, Tuple, Any
+from typing import List, Optional, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -81,6 +83,35 @@ class TyreCliffLSTM(nn.Module):
         return self.fc(out[:, -1, :]).squeeze(-1)  # shape: (batch,)
 
 
+def split_by_groups(
+    n_samples: int, groups: Optional[np.ndarray], holdout_frac: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Split sample indices into (keep, holdout), holding out the LAST groups (sessions).
+
+    Sliding-window sequences from the same session overlap by several laps, so splitting by
+    sample index leaks near-identical windows across the split. Holding out whole, most recent
+    sessions avoids that and keeps the split chronological. Falls back to a chronological index
+    split when groups is None or contains fewer than two sessions.
+
+    Args:
+        n_samples: Number of samples.
+        groups: Session index per sample (chronologically ordered), or None.
+        holdout_frac: Fraction of sessions (or samples, in the fallback) to hold out.
+
+    Returns:
+        Tuple of (keep_indices, holdout_indices).
+    """
+    indices = np.arange(n_samples)
+    unique_groups = np.unique(groups) if groups is not None else np.array([])
+    if len(unique_groups) >= 2:
+        n_holdout = min(len(unique_groups) - 1, max(1, math.ceil(len(unique_groups) * holdout_frac)))
+        holdout_groups = unique_groups[-n_holdout:]
+        holdout_mask = np.isin(groups, holdout_groups)
+        return indices[~holdout_mask], indices[holdout_mask]
+    n_holdout = max(1, int(n_samples * holdout_frac))
+    return indices[:-n_holdout], indices[-n_holdout:]
+
+
 def _build_data_loader(
     X_train: np.ndarray, y_train: np.ndarray, batch_size: int = BATCH_SIZE
 ) -> DataLoader:
@@ -114,9 +145,14 @@ def _run_training_loop(
     verbose: bool,
     config_label: str
 ) -> Tuple[float, int]:
-    """Run training loop and return (best validation MSE, best epoch)."""
+    """Run training loop and return (best validation MSE, best epoch).
+
+    The model's weights are restored to the best-validation epoch before returning, so the
+    returned model matches the reported best MSE (not whatever the last epoch produced).
+    """
     best_val_mse = float("inf")
     best_epoch = 0
+    best_state = copy.deepcopy(model.state_dict())
     train_start = time.time()
 
     for epoch in range(n_epochs):
@@ -140,6 +176,7 @@ def _run_training_loop(
         if val_mse < best_val_mse:
             best_val_mse = val_mse
             best_epoch = epoch + 1
+            best_state = copy.deepcopy(model.state_dict())
 
         elapsed = time.time() - ep_t0
         should_log = (
@@ -159,10 +196,13 @@ def _run_training_loop(
                 f"[{elapsed:.2f}s]"
             )
 
+    model.load_state_dict(best_state)
+    model.eval()
+
     total_time = time.time() - train_start
     logger.info(
         f"{config_label}Done {n_epochs} epochs in {total_time:.1f}s  "
-        f"| val={val_mse:.6f}  best={best_val_mse:.6f}@ep{best_epoch}"
+        f"| last val={val_mse:.6f}  best={best_val_mse:.6f}@ep{best_epoch} (weights restored)"
     )
     return best_val_mse, best_epoch
 
@@ -224,26 +264,34 @@ def run_hyperparameter_search(
     X: np.ndarray,
     y: np.ndarray,
     logger: logging.Logger,
+    groups: Optional[np.ndarray] = None,
+    grid: Optional[List[dict]] = None,
+    n_epochs: int = N_EPOCHS_SEARCH,
 ) -> Tuple[int, float, float]:
     """Grid search over HYPERPARAM_GRID.
 
     Args:
-        X: Full feature array, shape (N, seq_len, input_size).
-        y: Full target array, shape (N,).
+        X: Training feature array, shape (N, seq_len, input_size).
+        y: Training target array, shape (N,).
         logger: Logger instance.
+        groups: Optional session index per sample; when given, the validation set is the
+            last VAL_SPLIT fraction of sessions rather than of samples.
+        grid: Optional list of {"hidden_size", "learning_rate"} dicts (defaults to HYPERPARAM_GRID).
+        n_epochs: Epochs per configuration.
 
     Returns:
         Tuple of (best_hidden_size, best_learning_rate, best_val_mse).
     """
-    split = int(len(X) * (1 - VAL_SPLIT))
-    X_train, X_val = X[:split], X[split:]
-    y_train, y_val = y[:split], y[split:]
+    grid = grid if grid is not None else HYPERPARAM_GRID
+    train_idx, val_idx = split_by_groups(len(X), groups, VAL_SPLIT)
+    X_train, X_val = X[train_idx], X[val_idx]
+    y_train, y_val = y[train_idx], y[val_idx]
 
-    best_hidden: int = HYPERPARAM_GRID[0]["hidden_size"]
-    best_lr: float = HYPERPARAM_GRID[0]["learning_rate"]
+    best_hidden: int = grid[0]["hidden_size"]
+    best_lr: float = grid[0]["learning_rate"]
     best_mse: float = float("inf")
 
-    total_configs = len(HYPERPARAM_GRID)
+    total_configs = len(grid)
     search_t0 = time.time()
 
     logger.info("")
@@ -251,7 +299,7 @@ def run_hyperparameter_search(
     logger.info("  PHASE 2 / 4 -- HYPERPARAMETER SEARCH")
     logger.info("=" * 56)
     logger.info(f"  Grid size        : {total_configs} configurations")
-    logger.info(f"  Epochs per config: {N_EPOCHS_SEARCH}")
+    logger.info(f"  Epochs per config: {n_epochs}")
     logger.info(f"  Train samples    : {len(X_train):,}")
     logger.info(f"  Val samples      : {len(X_val):,}")
     logger.info(f"  Batch size       : {BATCH_SIZE}")
@@ -259,7 +307,7 @@ def run_hyperparameter_search(
 
     results_table = []
 
-    for idx, config in enumerate(HYPERPARAM_GRID, 1):
+    for idx, config in enumerate(grid, 1):
         h = config["hidden_size"]
         lr = config["learning_rate"]
         label = f"[{idx}/{total_configs}] "
@@ -271,7 +319,7 @@ def run_hyperparameter_search(
         _, val_mse = train_one_config(
             X_train, y_train, X_val, y_val,
             hidden_size=h, learning_rate=lr,
-            n_epochs=N_EPOCHS_SEARCH, logger=logger,
+            n_epochs=n_epochs, logger=logger,
             config_label=label,
         )
         cfg_time = time.time() - cfg_t0
@@ -310,22 +358,26 @@ def train_final_model(
     hidden_size: int,
     learning_rate: float,
     logger: logging.Logger,
+    groups: Optional[np.ndarray] = None,
+    n_epochs: int = N_EPOCHS_FINAL,
 ) -> TyreCliffLSTM:
-    """Train the final model on the full dataset for N_EPOCHS_FINAL epochs.
+    """Train the final model for n_epochs, keeping the best-validation-epoch weights.
 
     Args:
-        X: Full feature array, shape (N, seq_len, input_size).
-        y: Full target array, shape (N,).
+        X: Training feature array, shape (N, seq_len, input_size).
+        y: Training target array, shape (N,).
         hidden_size: Best hidden size from search.
         learning_rate: Best learning rate from search.
         logger: Logger instance.
+        groups: Optional session index per sample, used to hold out whole sessions for validation.
+        n_epochs: Number of training epochs.
 
     Returns:
         Trained TyreCliffLSTM model.
     """
-    split = int(len(X) * (1 - VAL_SPLIT))
-    X_train, X_val = X[:split], X[split:]
-    y_train, y_val = y[:split], y[split:]
+    train_idx, val_idx = split_by_groups(len(X), groups, VAL_SPLIT)
+    X_train, X_val = X[train_idx], X[val_idx]
+    y_train, y_val = y[train_idx], y[val_idx]
 
     logger.info("")
     logger.info("=" * 56)
@@ -334,7 +386,7 @@ def train_final_model(
     logger.info(f"  Architecture     : LSTM({INPUT_SIZE} -> {hidden_size} x {NUM_LAYERS})")
     logger.info(f"  Learning rate    : {learning_rate}")
     logger.info(f"  Dropout          : {DROPOUT_RATE}")
-    logger.info(f"  Epochs           : {N_EPOCHS_FINAL}")
+    logger.info(f"  Epochs           : {n_epochs}")
     logger.info(f"  Batch size       : {BATCH_SIZE}")
     logger.info(f"  Train samples    : {len(X_train):,}")
     logger.info(f"  Val samples      : {len(X_val):,}")
@@ -344,7 +396,7 @@ def train_final_model(
     model, val_mse = train_one_config(
         X_train, y_train, X_val, y_val,
         hidden_size=hidden_size, learning_rate=learning_rate,
-        n_epochs=N_EPOCHS_FINAL, logger=logger,
+        n_epochs=n_epochs, logger=logger,
         verbose=True,
         config_label="[Final] ",
     )
@@ -447,10 +499,11 @@ def predict_single_stint(
     actual_speeds = lap_features["mean_speed"].tolist()
     actual_lap_times = lap_features["lap_time_seconds"].tolist()
 
-    features_np = lap_features[LAP_FEATURES].values.copy()
+    lap_numbers = [int(n) for n in lap_features["race_lap_number"]]
 
-    if len(features_np) > 1:
-        features_np[0] = features_np[1]
+    # Out-laps are already excluded by extract_stints, so the first lap is a genuine racing lap
+    # and can seed the padding for the first prediction.
+    features_np = lap_features[LAP_FEATURES].values.copy()
 
     padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
 
@@ -493,6 +546,7 @@ def predict_single_stint(
 
     return {
         "stint_index": stint_index, "n_laps": len(actual_lap_times),
+        "lap_numbers": lap_numbers,
         "actual_laps": actual_laps_clean, "predicted_laps": predicted_laps,
         "confidence_upper": confidence_upper, "confidence_lower": confidence_lower,
         "cliff_lap": cliff_lap, "laps_remaining": laps_remaining,
