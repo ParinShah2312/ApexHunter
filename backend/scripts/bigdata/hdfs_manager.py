@@ -33,7 +33,10 @@ HDFS_ROOT: str = "/apexhunter"
 HDFS_RAW_DIR: str = f"{HDFS_ROOT}/season_data"
 HDFS_CLEAN_DIR: str = f"{HDFS_ROOT}/clean_data"
 HDFS_MISTAKE_DIR: str = f"{HDFS_ROOT}/mistake_data"
-HDFS_SUBDIRS: List[str] = ["season_data", "clean_data", "mistake_data"]
+# Spark's partitioned output (Year=/Round=/Session=) lives apart from the flat pandas files in
+# clean_data; writing both layouts into one folder broke listings and Spark reads of that folder
+HDFS_SPARK_CLEAN_DIR: str = f"{HDFS_ROOT}/clean_data_spark"
+HDFS_SUBDIRS: List[str] = ["season_data", "clean_data", "clean_data_spark", "mistake_data"]
 STATUS_LOG_PATH: Path = DATA_LAKE_DIR / "hdfs_status.json"
 
 logger = setup_logger(__name__)
@@ -167,7 +170,9 @@ def get_hdfs_dir_stats(hdfs_dir: str) -> Dict[str, object]:
         hdfs_dir: HDFS directory path to inspect.
 
     Returns:
-        Dict containing exists flag, file_count, total_size_mb, and files list.
+        Dict containing exists flag, file_count, total_size_mb, and files list. Files are listed
+        recursively (paths relative to hdfs_dir); directories and Hadoop marker files such as
+        _SUCCESS are not counted.
     """
     stats: Dict[str, object] = {
         "exists": False,
@@ -183,19 +188,18 @@ def get_hdfs_dir_stats(hdfs_dir: str) -> Dict[str, object]:
 
     stats["exists"] = True
 
-    # hadoop fs -ls <dir>
-    ls_res = _run_hadoop(["fs", "-ls", hdfs_dir])
+    # hadoop fs -ls -R <dir>: "-rw-r--r--   1 user group  123 2026-05-03 19:30 /path/file"
+    ls_res = _run_hadoop(["fs", "-ls", "-R", hdfs_dir])
     if ls_res.returncode == 0:
-        lines = ls_res.stdout.strip().split("\n")
-        for line in lines:
-            if line.startswith("Found"):
-                continue
+        prefix = hdfs_dir.rstrip("/") + "/"
+        for line in ls_res.stdout.strip().split("\n"):
             parts = line.split()
-            if len(parts) >= 8:
-                file_path = parts[-1]
-                file_name = file_path.split("/")[-1]
-                if file_name:
-                    stats["files"].append(file_name)
+            if len(parts) < 8 or not parts[0].startswith("-"):     # 'd...' = directory
+                continue
+            file_path = parts[-1]
+            if file_path.split("/")[-1].startswith(("_", ".")):    # _SUCCESS, .crc etc.
+                continue
+            stats["files"].append(file_path[len(prefix):] if file_path.startswith(prefix) else file_path)
 
     stats["file_count"] = len(stats["files"])
 
@@ -213,7 +217,7 @@ def get_hdfs_dir_stats(hdfs_dir: str) -> Dict[str, object]:
 
 
 def get_all_hdfs_stats() -> Tuple[Dict[str, Dict], Dict[str, object]]:
-    """Gather file statistics for all three HDFS directories.
+    """Gather file statistics for all HDFS directories.
 
     Returns:
         A tuple of (dir_stats, summary) where dir_stats maps directory names
@@ -222,6 +226,7 @@ def get_all_hdfs_stats() -> Tuple[Dict[str, Dict], Dict[str, object]]:
     dirs = {
         "season_data": HDFS_RAW_DIR,
         "clean_data": HDFS_CLEAN_DIR,
+        "clean_data_spark": HDFS_SPARK_CLEAN_DIR,
         "mistake_data": HDFS_MISTAKE_DIR,
     }
 
@@ -306,6 +311,7 @@ def write_status_log(
         "directories": dir_stats or {
             "season_data":  {"exists": False, "file_count": 0, "total_size_mb": 0.0, "files": []},
             "clean_data":   {"exists": False, "file_count": 0, "total_size_mb": 0.0, "files": []},
+            "clean_data_spark": {"exists": False, "file_count": 0, "total_size_mb": 0.0, "files": []},
             "mistake_data": {"exists": False, "file_count": 0, "total_size_mb": 0.0, "files": []},
         },
         "summary": summary or {
@@ -318,7 +324,7 @@ def write_status_log(
 
     try:
         DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(STATUS_LOG_PATH, "w") as f:
+        with open(STATUS_LOG_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         logger.info(f"Wrote status log to {STATUS_LOG_PATH}")
     except Exception as e:

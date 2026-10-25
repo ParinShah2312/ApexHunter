@@ -19,7 +19,8 @@ Full technical write-up: **[docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENT
 Current limitations are tracked in §8 of that document.
 Semester plan and scope decisions: **[docs/ROADMAP.md](docs/ROADMAP.md)**. Planned: Z-score vs
 Isolation Forest vs LSTM autoencoder for mistake detection, and Ridge vs RNN vs LSTM for tyre/pace
-prediction.
+prediction. Current progress, next steps and the rules for contributing (documentation, testing,
+verification) are in §0 and §3 of the roadmap.
 
 ---
 
@@ -43,12 +44,12 @@ ApexHunter 2.0/
 │       ├── isolation_forest/        # mistakes_features, mistakes_model, mistakes_io
 │       ├── lstm/                    # tyre_data, tyre_model, tyre_io
 │       ├── racing_line/             # racing_line_grid, racing_line_search, racing_line_io
-│       └── tests/                   # unit/ (25 files, 178 tests), integration/ (8 files), run_tests.py
+│       └── tests/                   # unit/ (23 files, 127 tests), integration/ (5 files, 18 tests), run_tests.py
 ├── frontend/
 │   ├── app.py                       # Streamlit entry point
 │   ├── config.py                    # paths, driver/team mappings, colours
 │   └── components/                  # sidebar, data_loader, header_bar, telemetry_charts, track_map,
-│                                    #   cv_feed, ai_analysis, racing_line, bigdata_tab, bigdata_charts
+│                                    #   cv_feed, ai_analysis, racing_line, bigdata_tab, bigdata_charts, scrubber
 ├── models/                          # best.pt (YOLO), tyre_lstm.pt, tyre_scaler.pkl, tyre_config.json
 ├── data_lake/                       # data + model outputs (gitignored)
 │   ├── season_data/  clean_data/    # raw / cleaned telemetry parquet (92 sessions each)
@@ -109,6 +110,7 @@ streamlit run frontend/app.py
 ```bash
 python backend/scripts/tests/run_tests.py          # unit tests (fast)
 python backend/scripts/tests/run_tests.py --all    # unit + integration (slow)
+python backend/scripts/tests/run_tests.py --file test_racing_line_pipeline.py   # one file (integration files run, not skipped)
 ```
 
 ### Optional: Big Data stack
@@ -126,7 +128,7 @@ python backend/scripts/bigdata/mongo_manager.py --upload --stats
 | Tab | What it shows |
 |---|---|
 | **Race Intelligence** | Master time scrubber, YOLO HUD video with live apex status and turn report card, speed/mistake track map |
-| **Telemetry** | Speed, throttle, brake, gear and RPM traces; top speed and brake/throttle overlap % |
+| **Telemetry** | Speed, throttle, brake, gear and RPM traces; top speed and brake/throttle overlap % (samples ≥ 50 km/h) |
 | **AI Analysis** | Isolation Forest mistakes per lap; LSTM tyre-cliff chart with confidence band |
 | **Racing Line** | Driver's fastest lap vs A\* / Dijkstra / BFS path, deviation per turn |
 | **Big Data** | Pipeline DAG, HDFS/Spark statistics, EDA charts, MongoDB leaderboard |

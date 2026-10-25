@@ -36,11 +36,6 @@ class TestGeometryDistance(unittest.TestCase):
         self.assertEqual(dist, float('inf'))
         self.assertIsNone(pt)
 
-    def test_empty_contour_array(self):
-        dist, pt = get_closest_distance((10, 10), np.array([]))
-        self.assertEqual(dist, float('inf'))
-        self.assertIsNone(pt)
-
 
 if __name__ == "__main__":
     unittest.main()

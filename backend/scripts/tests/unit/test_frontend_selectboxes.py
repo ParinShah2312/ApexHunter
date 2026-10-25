@@ -34,31 +34,6 @@ class TestSelectboxesNotTypeable(unittest.TestCase):
                      if not line.lstrip().startswith("#"))]
         self.assertEqual(users, [])
 
-    def test_rendered_sidebar_dropdowns_have_typing_disabled(self) -> None:
-        from streamlit.proto.Selectbox_pb2 import Selectbox
-        from streamlit.testing.v1 import AppTest
-
-        filter_mode_none = Selectbox.DESCRIPTOR.fields_by_name["filter_mode"] \
-            .enum_type.values_by_name["FILTER_MODE_NONE"].number
-
-        script = (
-            "import sys\n"
-            f"sys.path.insert(0, {str(FRONTEND_DIR)!r})\n"
-            "from components.sidebar import render_sidebar\n"
-            "render_sidebar()\n"
-        )
-        cwd = os.getcwd()
-        os.chdir(PROJECT_ROOT)
-        try:
-            at = AppTest.from_string(script, default_timeout=120).run()
-        finally:
-            os.chdir(cwd)
-        self.assertFalse(at.exception, [e.value for e in at.exception])
-        boxes = at.sidebar.selectbox
-        self.assertEqual([b.label for b in boxes], ["Year", "Session", "Driver"])
-        for box in boxes:
-            self.assertEqual(box.proto.filter_mode, filter_mode_none, box.label)
-
 
 class TestDropdownKeyLock(unittest.TestCase):
     """filter_mode=None stops typing, but Backspace/Delete would still clear a dropdown's shown

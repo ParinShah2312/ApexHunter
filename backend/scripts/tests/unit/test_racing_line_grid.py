@@ -1,5 +1,5 @@
 """Unit tests for racing_line/racing_line_grid.py: grid cells, node cost, adjacency,
-nearest-node lookup, coordinate scale and start/end selection."""
+nearest-node lookup and lap length."""
 
 import math
 import sys
@@ -13,8 +13,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from racing_line.racing_line_grid import (
-    DIAGONAL_COST_FACTOR, GridNode, build_adjacency, build_grid, compute_coordinate_scale,
-    compute_node_weight, find_start_end_nodes, get_nearest_node,
+    DIAGONAL_COST_FACTOR, GridNode, build_adjacency, build_grid, compute_node_weight,
+    get_nearest_node, lap_length_km,
 )
 
 
@@ -76,33 +76,14 @@ class TestNearestNode(unittest.TestCase):
             get_nearest_node({}, 0, 0)
 
 
-class TestCoordinateScale(unittest.TestCase):
+class TestLapLength(unittest.TestCase):
 
     def test_known_circle(self) -> None:
-        """One 90 s lap around a 10,000-unit circle for a 5 km circuit → 0.5 m per unit."""
+        """A 50,000-unit circle is 5,000 m at FastF1's 1/10 m per unit → 5.0 km."""
         t = np.linspace(0, 2 * math.pi, 5001)
-        r = 10_000 / (2 * math.pi)
-        df = pd.DataFrame({"X": r * np.cos(t), "Y": r * np.sin(t),
-                           "SessionTime": pd.to_timedelta(np.linspace(0, 90, len(t)), unit="s")})
-        self.assertAlmostEqual(compute_coordinate_scale(df, 5.0), 0.5, places=3)
-
-
-class TestStartEndNodes(unittest.TestCase):
-
-    def test_start_uses_same_grid_origin_as_build_grid(self) -> None:
-        """Regression for #17: a slow pit-lane stretch to the left (connected to the track) sets
-        the grid origin; the start must be the cell of the first fast sample under that origin."""
-        pit_x = np.arange(-500.0, 0.0, 10.0)
-        pit = pd.DataFrame({"X": pit_x, "Y": np.zeros_like(pit_x), "Speed": 5.0, "Brake": 0.0})
-        lap_x = np.arange(0.0, 1000.0, 10.0)
-        lap = pd.DataFrame({"X": lap_x, "Y": np.zeros_like(lap_x), "Speed": 200.0, "Brake": 0.0})
-        df = pd.concat([pit, lap], ignore_index=True)
-        df["SessionTime"] = pd.to_timedelta(np.arange(len(df)), unit="s")
-
-        grid = build_grid(df, 50.0)
-        start, end = find_start_end_nodes(grid, df, 50.0, build_adjacency(grid))
-        self.assertEqual(start, (10, 0))      # x = 0 is 500 units = 10 cells from origin -500
-        self.assertEqual(end, (29, 0))        # furthest cell of the connected track
+        r = 50_000 / (2 * math.pi)
+        df = pd.DataFrame({"X": r * np.cos(t), "Y": r * np.sin(t)})
+        self.assertAlmostEqual(lap_length_km(df), 5.0, places=3)
 
 
 if __name__ == "__main__":

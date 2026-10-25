@@ -163,7 +163,7 @@ def save_outputs(
     df_annotated.to_parquet(parquet_path, compression="snappy")
     logger.info(f"Saved annotated parquet: {parquet_path}")
 
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
     logger.info(f"Saved metadata JSON: {json_path}")
 

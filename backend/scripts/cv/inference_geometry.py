@@ -12,8 +12,9 @@ from utils import CONFIG
 # ── Configuration ─────────────────────────────────────────────────────────────
 _inf_config = CONFIG.get("inference", {})
 
-HIT_THRESHOLD: int = _inf_config.get("hit_threshold", 300)
-NEAR_THRESHOLD: int = _inf_config.get("near_threshold", 550)
+# Fallbacks equal config.json's values (they were 300/550 while the config said 130/250)
+HIT_THRESHOLD: int = _inf_config.get("hit_threshold", 130)
+NEAR_THRESHOLD: int = _inf_config.get("near_threshold", 250)
 LEFT_WHEEL_X_PCT: float = _inf_config.get("left_wheel_x_pct", 0.18)
 RIGHT_WHEEL_X_PCT: float = _inf_config.get("right_wheel_x_pct", 0.85)
 WHEEL_Y_PCT: float = _inf_config.get("wheel_y_pct", 0.60)

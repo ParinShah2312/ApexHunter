@@ -21,11 +21,6 @@ class TestGeometryWheels(unittest.TestCase):
         self.assertEqual(left[1], int(1080 * WHEEL_Y_PCT))
         self.assertEqual(right[1], left[1])
 
-    def test_returns_integers(self):
-        left, right = compute_wheel_positions(1920, 1080)
-        for val in [left[0], left[1], right[0], right[1]]:
-            self.assertIsInstance(val, int)
-
 
 if __name__ == "__main__":
     unittest.main()

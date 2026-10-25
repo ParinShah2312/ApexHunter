@@ -55,7 +55,7 @@ ApexHunter 2.0's primary store is a local **flat-file data lake**, with two opti
     *   **`.json`**: Tyre predictions, racing lines, model metadata, pipeline status logs.
     *   **`.csv`**: Computer Vision HUD metrics.
 *   **Architecture Flow**: `season_data/` (Raw) -> `clean_data/` -> `mistake_data/` / `tyre_predictions/` / `racing_lines/`.
-*   **HDFS** (`bigdata/hdfs_manager.py`): mirrors `season_data`, `clean_data` and `mistake_data` under `/apexhunter/`.
+*   **HDFS** (`bigdata/hdfs_manager.py`): mirrors `season_data`, `clean_data` and `mistake_data` under `/apexhunter/`; Spark writes its partitioned output to `/apexhunter/clean_data_spark`.
 *   **Apache Spark** (`bigdata/spark_clean_telemetry.py`): distributed version of the cleaning job, writing partitioned Parquet.
 *   **MongoDB** (`bigdata/mongo_manager.py`): `mistake_annotations` (per session × driver summaries) and `telemetry_sessions` (per-file metadata) collections, with leaderboard and per-driver queries.
 *   **Remaining shortcomings**:

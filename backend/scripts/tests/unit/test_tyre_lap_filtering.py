@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from lstm.tyre_data import (
     LAP_FEATURES, SEQUENCE_LENGTH, _consecutive_runs, extract_stints, representative_lap_mask,
+    window_positions,
 )
 from lstm.tyre_model import DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, predict_single_stint
 
@@ -115,6 +116,44 @@ class TestExtractStintsFiltering(unittest.TestCase):
         laps.loc[0, "PitOutTime"] = pd.Timedelta(seconds=1)
         stints = extract_stints(laps, _telemetry(30), _silent_logger())
         self.assertEqual(stints[0]["lap_features"]["race_lap_number"][0], 21.0)
+
+
+class TestWindowPositions(unittest.TestCase):
+
+    def test_only_laps_with_five_consecutive_predecessors(self) -> None:
+        laps = pd.Series([2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16])   # lap 9 removed
+        # Laps 7, 8 (positions 5, 6) and 15, 16 (positions 12, 13)
+        self.assertEqual(window_positions(laps, 5), [5, 6, 12, 13])
+
+
+def _model_and_scaler():
+    model = TyreCliffLSTM(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE)
+    scaler = StandardScaler().fit(np.random.RandomState(0).rand(30, INPUT_SIZE))
+    return model, scaler
+
+
+class TestPredictionWindows(unittest.TestCase):
+    """Regression for #20/#21: predictions used padded copies of the first lap, bridged removed
+    laps and dropped stints too short for a training window."""
+
+    def test_predictions_only_where_a_real_window_exists(self) -> None:
+        status = ["1"] * 16
+        status[8] = "4"                                     # lap 9 under safety car
+        stint = extract_stints(_laps(range(1, 17), track_status=status), _telemetry(16), _silent_logger())[0]
+        result = predict_single_stint(stint, *_model_and_scaler(), 230.0, 10.0, SEQUENCE_LENGTH)
+        predicted = [lap for lap, p in zip(result["lap_numbers"], result["predicted_laps"]) if p is not None]
+        self.assertEqual(predicted, [7, 8, 15, 16])
+        for key in ("confidence_lower", "confidence_upper"):
+            self.assertEqual([p is None for p in result[key]], [p is None for p in result["predicted_laps"]])
+
+    def test_short_stint_reported_without_predictions(self) -> None:
+        stint = extract_stints(_laps(range(2, 7)), _telemetry(6), _silent_logger())[0]
+        result = predict_single_stint(stint, *_model_and_scaler(), 230.0, 10.0, SEQUENCE_LENGTH)
+        self.assertEqual(result["lap_numbers"], [2, 3, 4, 5, 6])
+        self.assertEqual(result["predicted_laps"], [None] * 5)
+        self.assertEqual(len([t for t in result["actual_laps"] if t is not None]), 5)
+        self.assertIsNone(result["cliff_lap"])
+        self.assertIsNone(result["laps_remaining"])
 
 
 class TestPredictionUsesRealFirstLap(unittest.TestCase):

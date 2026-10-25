@@ -492,60 +492,68 @@ def predict_single_stint(
     stint_data: dict, model: nn.Module, scaler: Any,
     y_mean: float, y_std: float, seq_len: int
 ) -> dict:
-    """Predict cliff for a single stint and return the result dictionary."""
-    from lstm.tyre_data import LAP_FEATURES
+    """Predict lap times and the tyre cliff for one stint.
+
+    A lap is predicted only if the seq_len laps before it are consecutive kept laps (the same
+    rule as the training windows, see tyre_data.window_positions); other laps get None. So the
+    model never sees padding or a window across a removed lap, and no lap is predicted from
+    itself. Stints with no such lap are still returned, with actual laps and no predictions.
+    """
+    from lstm.tyre_data import LAP_FEATURES, window_positions
     stint_index = stint_data["stint_index"]
     lap_features = pd.DataFrame(stint_data["lap_features"])
     actual_speeds = lap_features["mean_speed"].tolist()
     actual_lap_times = lap_features["lap_time_seconds"].tolist()
+    n = len(lap_features)
 
     lap_numbers = [int(n) for n in lap_features["race_lap_number"]]
 
-    # Out-laps are already excluded by extract_stints, so the first lap is a genuine racing lap
-    # and can seed the padding for the first prediction.
-    features_np = lap_features[LAP_FEATURES].values.copy()
+    predicted_laps: List[Optional[float]] = [None] * n
+    confidence_lower: List[Optional[float]] = [None] * n
+    confidence_upper: List[Optional[float]] = [None] * n
 
-    padded_features = np.vstack([np.tile(features_np[0], (seq_len, 1)), features_np])
+    positions = window_positions(lap_features["race_lap_number"], seq_len)
+    if positions:
+        features_np = lap_features[LAP_FEATURES].values
+        sequences = np.array([features_np[j - seq_len : j] for j in positions], dtype=np.float32)
+        seq_2d = sequences.reshape(-1, INPUT_SIZE)
+        seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
 
-    new_seqs = []
-    for i in range(len(features_np)):
-        new_seqs.append(padded_features[i : i + seq_len])
+        mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
 
-    sequences = np.array(new_seqs, dtype=np.float32)
-    seq_2d = sequences.reshape(-1, INPUT_SIZE)
-    seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
+        mean_preds_speed = mean_preds * y_std + y_mean
+        lower_speed = lower * y_std + y_mean
+        upper_speed = upper * y_std + y_mean
 
-    mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
+        valid_pairs = [(s, t) for s, t in zip(actual_speeds, actual_lap_times) if not pd.isna(t) and t > 0]
+        if valid_pairs:
+            track_dist = float(np.mean([s * t for s, t in valid_pairs]))
+        else:
+            track_dist = actual_speeds[0] * 90.0
 
-    mean_preds_speed = (mean_preds * y_std + y_mean).tolist()
-    lower_speed = (lower * y_std + y_mean).tolist()
-    upper_speed = (upper * y_std + y_mean).tolist()
+        def speed_to_time(s): return float(track_dist / max(s, 1.0))
 
-    valid_pairs = [(s, t) for s, t in zip(actual_speeds, actual_lap_times) if not pd.isna(t) and t > 0]
-    if valid_pairs:
-        track_dist = float(np.mean([s * t for s, t in valid_pairs]))
-    else:
-        track_dist = actual_speeds[0] * 90.0
+        for k, j in enumerate(positions):
+            predicted_laps[j] = speed_to_time(mean_preds_speed[k])
+            confidence_lower[j] = speed_to_time(upper_speed[k])    # faster speed -> shorter time
+            confidence_upper[j] = speed_to_time(lower_speed[k])
 
-    def speed_to_time(s): return track_dist / max(s, 1.0)
-
-    predicted_laps = [speed_to_time(s) for s in mean_preds_speed]
-    confidence_lower = [speed_to_time(s) for s in upper_speed]
-    confidence_upper = [speed_to_time(s) for s in lower_speed]
     actual_laps_clean = [t if not pd.isna(t) else None for t in actual_lap_times]
 
-    best_lap_time = min(predicted_laps)
-    best_lap_idx = predicted_laps.index(best_lap_time)
+    # Cliff: first predicted lap after the best predicted lap that is 1.5 s slower than it
     cliff_lap = None
-    for i in range(best_lap_idx + 1, len(predicted_laps)):
-        if predicted_laps[i] > best_lap_time + 1.5:
-            cliff_lap = i
-            break
+    if positions:
+        best_idx = min(positions, key=lambda j: predicted_laps[j])
+        best_lap_time = predicted_laps[best_idx]
+        for j in positions:
+            if j > best_idx and predicted_laps[j] > best_lap_time + 1.5:
+                cliff_lap = j
+                break
 
-    laps_remaining = (len(actual_lap_times) - cliff_lap) if cliff_lap is not None else None
+    laps_remaining = (n - cliff_lap) if cliff_lap is not None else None
 
     return {
-        "stint_index": stint_index, "n_laps": len(actual_lap_times),
+        "stint_index": stint_index, "n_laps": n,
         "lap_numbers": lap_numbers,
         "actual_laps": actual_laps_clean, "predicted_laps": predicted_laps,
         "confidence_upper": confidence_upper, "confidence_lower": confidence_lower,

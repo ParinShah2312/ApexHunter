@@ -68,7 +68,7 @@ def _load_json_log(path: Path) -> Optional[Dict[str, Any]]:
         Parsed dict on success, or None if the file is missing or invalid.
     """
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -117,6 +117,16 @@ def _load_sample_telemetry() -> Optional[pd.DataFrame]:
     return df
 
 
+@st.cache_resource(ttl=60)
+def _mongo_available() -> bool:
+    """Whether MongoDB answers, re-checked at most once a minute.
+
+    Checking on every rerun cost ~3 s per click whenever MongoDB was offline (the ping timeout)
+    and logged the same error each time.
+    """
+    return MONGO_IMPORT_OK and check_mongo_available()
+
+
 @st.cache_data(ttl=30)
 
 
@@ -126,7 +136,7 @@ def _fetch_leaderboard() -> List[Dict[str, Any]]:
     Returns:
         List of leaderboard dicts, or empty list if unavailable.
     """
-    if not MONGO_IMPORT_OK:
+    if not _mongo_available():
         return []
     try:
         client = get_client()
@@ -289,7 +299,7 @@ def _render_telemetry_section(df_full: Optional[pd.DataFrame] = None) -> None:
         st.markdown("##### Speed vs RPM (Colored by Gear)")
         st.plotly_chart(build_speed_rpm_scatter(sample_df), width='stretch')
     with col_h:
-        st.markdown("##### Speed Trace Overlay")
+        st.markdown("##### Speed Over Session Time")
         st.plotly_chart(build_speed_over_distance(sample_df), width='stretch')
 
     # Quick stats
@@ -391,7 +401,7 @@ def _render_mongo_section() -> None:
     try:
         if not MONGO_IMPORT_OK:
             raise Exception("Module not available")
-        if not check_mongo_available():
+        if not _mongo_available():
             raise Exception("MongoDB offline")
 
         client = get_client()

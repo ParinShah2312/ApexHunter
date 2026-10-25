@@ -16,7 +16,7 @@ CACHE_DIR = PROJECT_ROOT / "cache"
 CONFIG_FILE = PROJECT_ROOT / "backend" / "config.json"
 
 try:
-    with open(CONFIG_FILE, "r") as f:
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         CONFIG = json.load(f)
 except Exception as e:
     print(f"Failed to load config from {CONFIG_FILE}: {e}")

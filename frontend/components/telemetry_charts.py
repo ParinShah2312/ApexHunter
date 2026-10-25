@@ -11,6 +11,12 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from components.data_loader import downsample
+from components.scrubber import current_scrub, render_telemetry_scrubber
+
+# Brake overlap only counts samples at or above this speed. Below it the car is in the garage, in
+# its pit box or on the grid, where brake and throttle are often held together on purpose (2024 R1
+# Q #11: 1,447 of 1,541 overlap samples were at 0 km/h, turning 0.67 % into 6.05 %).
+MIN_OVERLAP_SPEED_KMH = 50.0
 
 
 def _get_time_col(df: pd.DataFrame) -> str:
@@ -21,25 +27,29 @@ def _get_time_col(df: pd.DataFrame) -> str:
 
 
 def _compute_brake_overlap(df: pd.DataFrame) -> float:
-    """Return percentage of rows where the brake is on AND Throttle > 5%.
+    """Return the percentage of on-track samples (Speed >= MIN_OVERLAP_SPEED_KMH) where the brake
+    is on AND Throttle > 5%.
 
     Brake is a binary on/off flag in FastF1; the 5% throttle threshold matches the
     Isolation Forest brake_throttle_overlap feature and filters out pedal sensor noise.
     """
-    if len(df) == 0:
+    on_track = df[df["Speed"] >= MIN_OVERLAP_SPEED_KMH]
+    if len(on_track) == 0:
         return 0.0
-    return float(((df["Brake"] >= 0.5) & (df["Throttle"] > 5)).sum() / len(df) * 100)
+    overlap = (on_track["Brake"] >= 0.5) & (on_track["Throttle"] > 5)
+    return float(overlap.sum() / len(on_track) * 100)
 
 
 def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
     """Render the three KPI metric cards row."""
-    hours, remainder = divmod(scrub_seconds, 3600)
+    # Whole milliseconds first: truncating the float showed e.g. 1622.599 s as "27:02.598"
+    total_s, ms = divmod(round(scrub_seconds * 1000), 1000)
+    hours, remainder = divmod(total_s, 3600)
     mins, secs = divmod(remainder, 60)
-    ms = (secs - int(secs)) * 1000
     if hours > 0:
-        time_str = f"{int(hours):02d}:{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+        time_str = f"{hours:02d}:{mins:02d}:{secs:02d}.{ms:03d}"
     else:
-        time_str = f"{int(mins):02d}:{int(secs):02d}.{int(ms):03d}"
+        time_str = f"{mins:02d}:{secs:02d}.{ms:03d}"
 
     top_speed = float(df_driver["Speed"].max()) if not df_driver.empty else 0.0
     overlap_pct = _compute_brake_overlap(df_driver)
@@ -50,8 +60,8 @@ def _render_metric_cards(df_driver: pd.DataFrame, scrub_seconds: float) -> None:
     with mc2:
         st.metric("Top Speed", f"{top_speed:.1f} km/h")
     with mc3:
-        st.metric("Brake Overlap", f"{overlap_pct:.1f}%")
-        st.caption("lower is better")
+        st.metric("Brake Overlap", f"{overlap_pct:.2f}%")
+        st.caption(f"brake + throttle at once, samples ≥ {MIN_OVERLAP_SPEED_KMH:.0f} km/h · lower is better")
 
 
 def _build_telemetry_figure(
@@ -153,16 +163,10 @@ def render_telemetry(
         or None if empty.
     """
     if df_driver.empty:
+        # Not st.stop(): that stopped every tab, not just this one
         st.warning(f"No telemetry data found for driver {driver_name} (#{driver_number}).")
-        st.stop()
         return None
 
-    scrub_val = st.session_state.get("scrub_seconds", 0.0)
-
-    # Render KPI Cards
-    _render_metric_cards(df_driver, scrub_val)
-
-    # Time Scrubber
     time_col = _get_time_col(df_driver)
 
     if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
@@ -172,21 +176,10 @@ def render_telemetry(
         min_t = float(df_driver[time_col].min())
         max_t = float(df_driver[time_col].max())
 
-    def _sync_scrub():
-        st.session_state["scrub_seconds"] = st.session_state["telemetry_scrub_seconds"]
-
-    scrub_init = st.session_state.get("scrub_seconds", max_t)
-    scrub_init = max(min_t, min(scrub_init, max_t))
-
-    scrub = st.slider(
-        "Session Time",
-        min_value=min_t,
-        max_value=max_t,
-        value=scrub_init,
-        format="%.1f s",
-        key="telemetry_scrub_seconds",
-        on_change=_sync_scrub,
-    )
+    # Cards, slider, chart cut-off and scrub line all use the one shared position
+    scrub = current_scrub(min_t, max_t)
+    _render_metric_cards(df_driver, scrub)
+    render_telemetry_scrubber(min_t, max_t)
 
     # Filter to scrub position
     if pd.api.types.is_timedelta64_dtype(df_driver[time_col]):
@@ -210,7 +203,7 @@ def render_telemetry(
         df_chart=df_chart,
         x_data=x_data,
         driver_number=driver_number,
-        scrub_val=scrub_val
+        scrub_val=scrub
     )
     st.plotly_chart(fig, width='stretch')
 

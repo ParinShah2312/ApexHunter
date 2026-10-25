@@ -50,7 +50,8 @@ def extract_frames_from_video(video_path: Path, output_dir: Path) -> int:
     duration_sec = total_frames / video_fps if video_fps > 0 else 0
 
     # Calculate frame interval: skip this many frames between captures
-    frame_interval = int(video_fps / TARGET_FPS) if video_fps > 0 else 1
+    # round, not int: int() gave 0 below TARGET_FPS (modulo by zero) and truncated e.g. 29.97/5 to 5
+    frame_interval = max(1, round(video_fps / TARGET_FPS)) if video_fps > 0 else 1
 
     logger.info(f"{video_path.name} | FPS: {video_fps:.1f} | Duration: {duration_sec:.1f}s | Interval: every {frame_interval} frames")
 

@@ -50,7 +50,7 @@ def save_model_artifacts(
     logger.info(f"Saved scaler: {scaler_path}")
 
     config_path = models_dir / CONFIG_FILENAME
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     logger.info(f"Saved config: {config_path}")
 
@@ -93,7 +93,7 @@ def load_model_artifacts(
         )
 
     # Load config
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     logger.info(f"Loaded config: {config_path}")
 
@@ -164,7 +164,7 @@ def save_prediction(
         logger: Logger instance.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     logger.info(f"Saved tyre prediction: {output_path}")
 

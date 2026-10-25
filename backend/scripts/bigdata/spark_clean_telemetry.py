@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import col, greatest, last, least, lit
-from pyspark.sql.types import FloatType
+from pyspark.sql.types import DoubleType, FloatType, IntegerType, LongType
 
 # Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -72,7 +72,7 @@ def write_run_log(log_data: Dict[str, Any]) -> None:
     """
     try:
         DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(SPARK_RUN_LOG_PATH, "w") as f:
+        with open(SPARK_RUN_LOG_PATH, "w", encoding="utf-8") as f:
             json.dump(log_data, f, indent=2)
         logger.info(f"Wrote Spark run log to {SPARK_RUN_LOG_PATH}")
     except Exception as e:
@@ -106,10 +106,14 @@ def main() -> None:
 
     if use_hdfs:
         input_path = f"{SPARK_HDFS_URI}/apexhunter/season_data"
-        output_path = f"{SPARK_HDFS_URI}/apexhunter/clean_data"
+        output_path = f"{SPARK_HDFS_URI}/apexhunter/clean_data_spark"
     else:
-        input_path = str(DATA_LAKE_DIR / "season_data")
-        output_path = str(DATA_LAKE_DIR / "clean_data")
+        # Explicit file:/// URIs: with Hadoop installed, fs.defaultFS is hdfs://localhost:9000 and
+        # a plain C:\... path was resolved on HDFS, so local mode always failed.
+        # Never data_lake/clean_data: that holds the pandas output every model reads, and
+        # --force (mode "overwrite") would delete the whole folder.
+        input_path = "file:///" + (DATA_LAKE_DIR / "season_data").as_posix()
+        output_path = "file:///" + (DATA_LAKE_DIR / "clean_data_spark").as_posix()
 
     start_time = time.time()
 
@@ -138,6 +142,7 @@ def main() -> None:
         logger.info(f"Reading from {input_path}")
         df = spark.read.parquet(input_path)
 
+        log_data["files_processed"] = len(df.inputFiles())
         rows_input = df.count()
         log_data["rows_input"] = rows_input
         logger.info(f"Rows in: {rows_input:,}")
@@ -153,12 +158,15 @@ def main() -> None:
             df = df.filter(~condition)
 
         # Step 3: Forward fill small gaps using last-observation-carry-forward
+        # isinstance, not str(): PySpark 3.5 prints types as "DoubleType()", so the old name
+        # comparison matched nothing and the fill never ran
         numeric_cols = [
             f.name for f in df.schema.fields
-            if str(f.dataType) in ("DoubleType", "FloatType", "LongType", "IntegerType")
+            if isinstance(f.dataType, (DoubleType, FloatType, LongType, IntegerType))
             and f.name not in ("Round", "Year")
         ]
-        window_spec = Window.partitionBy("Driver").orderBy("SessionTime").rowsBetween(
+        # Fill within one driver's session only, never from another session or driver
+        window_spec = Window.partitionBy("Year", "Round", "Session", "Driver").orderBy("SessionTime").rowsBetween(
             Window.unboundedPreceding, Window.currentRow
         )
         for c in numeric_cols:
@@ -215,7 +223,7 @@ def main() -> None:
                     pass
 
         else:
-            out_dir = Path(output_path)
+            out_dir = DATA_LAKE_DIR / "clean_data_spark"
             if out_dir.exists():
                 total_bytes = sum(
                     f.stat().st_size for f in out_dir.glob("**/*") if f.is_file()
@@ -241,6 +249,9 @@ def main() -> None:
             # NOTE: Windows-only Spark temp dir cleanup error may appear here — harmless.
 
         write_run_log(log_data)
+
+    if log_data["status"] != "success":
+        sys.exit(1)     # a failed run used to exit 0
 
 
 if __name__ == "__main__":

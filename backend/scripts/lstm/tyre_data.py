@@ -70,6 +70,19 @@ def _consecutive_runs(lap_numbers: pd.Series) -> List[np.ndarray]:
     return np.split(np.arange(len(values)), breaks)
 
 
+def window_positions(race_lap_numbers: pd.Series, seq_len: int = SEQUENCE_LENGTH) -> List[int]:
+    """Positions (0-based, in stint order) of laps that have a full input window: the seq_len
+    laps immediately before them are kept laps with consecutive race lap numbers.
+
+    Training windows and predictions both use this rule, so the model is only ever asked about
+    the kind of window it was trained on (never padding, never a window across a removed lap).
+    """
+    positions: List[int] = []
+    for run in _consecutive_runs(race_lap_numbers):
+        positions.extend(int(j) for j in run[seq_len:])
+    return positions
+
+
 def extract_stints(
     driver_laps: pd.DataFrame, telemetry: pd.DataFrame, logger: logging.Logger
 ) -> List[dict]:
@@ -85,7 +98,9 @@ def extract_stints(
         logger: Logger instance.
 
     Returns:
-        List of dicts, one per stint with at least one training window:
+        List of dicts, one per stint with at least MIN_STINT_LAPS kept laps. Stints too short or
+        too broken up for a training window are still returned (with empty sequences) so that
+        prediction can show them:
         - stint_index: int, 0-based stint index
         - n_laps: int, number of representative laps kept
         - cliff_lap: int or None, first kept lap whose speed dropped CLIFF_SPEED_DROP_KMH below the first
@@ -149,26 +164,22 @@ def extract_stints(
                 cliff_lap = i
                 break
 
-        # Build sliding windows (5 input laps + 1 target lap) within each run of consecutive laps
-        sequences = []
-        targets = []
-        for run in _consecutive_runs(lap_features_df["race_lap_number"]):
-            run_df = lap_features_df.iloc[run]
-            for i in range(len(run_df) - SEQUENCE_LENGTH):
-                window = run_df.iloc[i : i + SEQUENCE_LENGTH][LAP_FEATURES].values
-                target = run_df["mean_speed"].iloc[i + SEQUENCE_LENGTH]
-                sequences.append(window)
-                targets.append(float(target))
+        # Sliding windows: 5 consecutive input laps -> the next lap's mean speed
+        features_np = lap_features_df[LAP_FEATURES].values
+        positions = window_positions(lap_features_df["race_lap_number"])
+        sequences = [features_np[j - SEQUENCE_LENGTH : j] for j in positions]
+        targets = [float(lap_features_df["mean_speed"].iloc[j]) for j in positions]
 
-        if len(sequences) > 0:
-            stint_results.append({
-                "stint_index": int(stint_num) - 1, # Make 0-indexed to match old logic
-                "n_laps": len(lap_features_df),
-                "cliff_lap": cliff_lap,
-                "lap_features": lap_features_df.to_dict(orient="list"),
-                "sequences": sequences,
-                "targets": targets,
-            })
+        # Kept even without windows (#20): training simply gets nothing from it, while
+        # prediction still reports the stint (actual laps, no predictions)
+        stint_results.append({
+            "stint_index": int(stint_num) - 1, # Make 0-indexed to match old logic
+            "n_laps": len(lap_features_df),
+            "cliff_lap": cliff_lap,
+            "lap_features": lap_features_df.to_dict(orient="list"),
+            "sequences": sequences,
+            "targets": targets,
+        })
 
     return stint_results
 

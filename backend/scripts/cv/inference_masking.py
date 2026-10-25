@@ -31,7 +31,7 @@ def process_masks(
         left_wheel: (x, y) position of the left wheel reference point.
         right_wheel: (x, y) position of the right wheel reference point.
         center_x: Horizontal centre of the frame in pixels.
-        expected_turn: Hardcoded expected turn direction ('Left', 'Right', or '-').
+        expected_turn: Turn direction from the FastF1 turn windows ('Left', 'Right', or '-' outside a turn).
         speed_cat: Speed classification for the current turn.
 
     Returns:
@@ -54,6 +54,8 @@ def process_masks(
         for i, mask in enumerate(masks):
             cls_id = int(classes[i])
 
+            # Masks must come from predict(..., retina_masks=True), which already maps them to the
+            # frame (padding removed); this resize is then a no-op safety net, not a correction.
             mask_resized = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
             mask_binary = (mask_resized * 255).astype(np.uint8)
             contours, _ = cv2.findContours(mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -86,7 +88,7 @@ def process_masks(
                         if M['m00'] != 0:
                             cx = int(M['m10'] / M['m00'])
 
-                            # Use hardcoded expected_turn if available, otherwise fallback to dynamic
+                            # Use the turn window's direction if in a turn, otherwise fall back to the curb's side
                             is_right = (cx > center_x) if expected_turn == "-" else (expected_turn == "Right")
 
                             # Apply Track Limit Extraction (Isolate the asphalt-side inner edge)

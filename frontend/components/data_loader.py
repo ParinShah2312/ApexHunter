@@ -13,8 +13,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+# FastF1 lookups that fail (offline, rate limit) return an empty result; without an expiry that
+# empty result was cached until the app restarted
+FASTF1_LOOKUP_TTL_S = 600
 
-@st.cache_data(show_spinner=False)
+
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
 def get_lap_boundaries(year: int, round_num: int, session_type: str, driver_number: str) -> List[dict]:
     """Fetch lap start/end times from FastF1 for a specific driver.
 
@@ -68,7 +72,7 @@ def assign_lap_numbers(df: pd.DataFrame, boundaries: List[dict]) -> pd.DataFrame
     return df
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
 
 
 def get_event_schedule(year: int) -> Dict[int, str]:
@@ -134,14 +138,14 @@ def load_mistake_meta(filepath: str, mtime: float = 0) -> Optional[dict]:
     p = Path(filepath)
     if not p.exists():
         return None
-    with open(p, "r") as f:
+    with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 @st.cache_data(show_spinner=False)
 
 
-def load_cv_metrics(filepath: str) -> Optional[pd.DataFrame]:
+def load_cv_metrics(filepath: str, mtime: float = 0) -> Optional[pd.DataFrame]:
     """Reads the CV metrics CSV and cleans the columns.
 
     Converts has_curb from string to bool.
@@ -184,8 +188,21 @@ def load_turn_windows(filepath: str) -> Optional[List[dict]]:
     """
     if not Path(filepath).exists():
         return None
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)["turns"]
+
+
+def load_video_lap(filepath: str) -> Optional[dict]:
+    """Return the lap a processed video shows (year, round, session, driver_number, lap_start_s,
+    lap_end_s) plus "video_offset_s", from the turn windows JSON; None if it isn't recorded
+    (files written before #35)."""
+    if not Path(filepath).exists():
+        return None
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if "lap" not in data:
+        return None
+    return {**data["lap"], "video_offset_s": data.get("video_offset_s", 0.0)}
 
 
 def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
@@ -204,7 +221,7 @@ def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
     if len(df) <= max_points:
         return df
 
-    step = len(df) // max_points
+    step = -(-len(df) // max_points)        # ceil: floor gave step 1 (no downsampling) for 5,001-9,999 rows
     sampled = df.iloc[::step]
 
     # Always include the last row to preserve full time range
@@ -219,7 +236,7 @@ def load_racing_line(filepath: str) -> Optional[dict]:
     if not Path(filepath).exists():
         return None
     try:
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
@@ -230,7 +247,7 @@ def load_tyre_prediction(filepath: str) -> Optional[dict]:
     if not Path(filepath).exists():
         return None
     try:
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None

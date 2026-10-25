@@ -1,22 +1,21 @@
 """Unit tests for racing_line/racing_line_io.py: loading, fastest-lap slicing, output building,
 time-saved estimate and saving."""
 
-import json
 import logging
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import pandas as pd
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from racing_line.racing_line_grid import GridNode
+import numpy as np
+
 from racing_line.racing_line_io import (
-    build_output, compute_time_saved, fetch_fastest_lap_bounds, load_and_validate, save_output,
+    build_output, compute_time_saved, estimate_path_time, load_and_validate,
 )
 from racing_line.racing_line_search import SearchResult
 
@@ -58,47 +57,37 @@ class TestLoadAndValidate(unittest.TestCase):
             load_and_validate(self.path, "99", LOG)
 
 
-class TestFetchFastestLapBounds(unittest.TestCase):
+
+class TestTimeEstimate(unittest.TestCase):
+    """Fastest lap: a straight line along X, 0-1000 units (100 m at 0.1 m/unit), sampled every
+    10 units; 180 km/h (50 m/s) up to X = 500 and 90 km/h (25 m/s) after."""
 
     def setUp(self) -> None:
-        self.df = pd.DataFrame({"Year": [2023] * 6, "Round": [1] * 6, "Session": ["Q"] * 6,
-                                "SessionTime": pd.to_timedelta(range(0, 60, 10), unit="s"), "X": range(6)})
+        x = np.arange(0.0, 1001.0, 10.0)
+        self.lap = pd.DataFrame({"X": x, "Y": 0.0, "Speed": np.where(x <= 500, 180.0, 90.0)})
 
-    def test_slices_to_fastest_lap(self) -> None:
-        session = mock.MagicMock()
-        session.laps.pick_drivers.return_value.pick_fastest.return_value = {
-            "LapStartTime": pd.Timedelta(seconds=10), "Time": pd.Timedelta(seconds=30)}
-        with mock.patch("fastf1.get_session", return_value=session) as get_session, \
-             mock.patch("racing_line.racing_line_io.enable_fastf1_cache"):
-            lap = fetch_fastest_lap_bounds(self.df, "1", LOG)
-        get_session.assert_called_once_with(2023, 1, "Q")
-        session.laps.pick_drivers.assert_called_once_with("1")
-        self.assertEqual(lap["X"].tolist(), [1, 2, 3])
+    def test_driver_lap_uses_nearest_lap_speeds(self) -> None:
+        path = [(0.0, 0.0), (500.0, 0.0), (1000.0, 0.0)]
+        # 50 m at 50 m/s + 50 m at 25 m/s
+        self.assertAlmostEqual(estimate_path_time(path, self.lap, scale=0.1), 1.0 + 2.0)
 
-    def test_falls_back_to_full_session_on_failure(self) -> None:
-        with mock.patch("fastf1.get_session", side_effect=RuntimeError("offline")), \
-             mock.patch("racing_line.racing_line_io.enable_fastf1_cache"):
-            self.assertIs(fetch_fastest_lap_bounds(self.df, "1", LOG), self.df)
+    def test_speed_comes_from_nearest_sample_not_a_session_average(self) -> None:
+        """Regression for #39: speeds were cell averages over the whole session (out-laps
+        included) and a path's time was its length / mean speed. A path running 30 units beside
+        the slow half is timed at the lap's slow-half speed."""
+        path = [(500.0, 30.0), (1000.0, 30.0)]
+        self.assertAlmostEqual(estimate_path_time(path, self.lap, scale=0.1), 2.0)
 
-
-class TestComputeTimeSaved(unittest.TestCase):
-    """All nodes run at 180 km/h (50 m/s), so time = path length (m) / 50."""
-
-    def setUp(self) -> None:
-        self.grid = {(i, 0): GridNode(i, 0, i * 50.0, 0.0, 180.0, 0.0, 1.0, 1) for i in range(30)}
-
-    def test_shorter_optimal_path_saves_time(self) -> None:
-        optimal = [(0.0, 0.0), (100.0, 0.0)]                       # 100 m → 2.0 s
-        driver = [(0.0, 0.0), (60.0, 0.0), (120.0, 0.0)]           # 120 m → 2.4 s
-        self.assertAlmostEqual(compute_time_saved(_sr(optimal), driver, self.grid, scale=1.0), 0.4)
-
-    def test_clamped_to_five_seconds(self) -> None:
-        optimal = [(0.0, 0.0), (100.0, 0.0)]                       # 2 s
-        driver = [(0.0, 0.0), (1000.0, 0.0)]                       # 20 s → 18 s, clamped
-        self.assertEqual(compute_time_saved(_sr(optimal), driver, self.grid, scale=1.0), 5.0)
+    def test_time_saved_positive_when_faster_and_not_clamped(self) -> None:
+        shortcut = _sr([(0.0, 0.0), (500.0, 0.0)])                 # 1 s
+        self.assertAlmostEqual(compute_time_saved(shortcut, 3.0, self.lap, 0.1), 2.0)
+        # A path 10x longer than the lap at the fast-half speed: 1000 m / 50 m/s = 20 s, so
+        # -17 s. The old code clamped every result to +/-5 s, which hid the broken estimate.
+        detour = _sr([(0.0, 0.0), (0.0, 10000.0)])
+        self.assertAlmostEqual(compute_time_saved(detour, 3.0, self.lap, 0.1), -17.0)
 
     def test_none_when_no_path(self) -> None:
-        self.assertIsNone(compute_time_saved(_sr([], found=False), [(0.0, 0.0)], self.grid, 1.0))
+        self.assertIsNone(compute_time_saved(_sr([], found=False), 3.0, self.lap, 0.1))
 
 
 class TestOutputs(unittest.TestCase):
@@ -106,21 +95,16 @@ class TestOutputs(unittest.TestCase):
     def test_build_output_values(self) -> None:
         a, d, b = _sr([(0.0, 0.0), (1.0, 1.0)], 3.33333), _sr([(0.0, 0.0)], 3.33333, name="dijkstra"), \
             _sr([(0.0, 0.0)], 0.0, name="bfs")
-        data = build_output("s.parquet", "44", 50.0, 5.4, 0.3, a, d, b, 4.444449, [(1.0, 2.0)], [], 15)
+        lap = {"lap_number": 7, "lap_time_s": 89.708, "length_km": 5.36}
+        data = build_output("s.parquet", "44", 50.0, lap, 0.1, a, d, b, 4.444449, [(1.0, 2.0)], [], 15)
         self.assertEqual(data["driver_path"], [[1.0, 2.0]])
         self.assertEqual(data["algorithms"]["astar"]["path"], [[0.0, 0.0], [1.0, 1.0]])
         self.assertEqual(data["algorithms"]["astar"]["cost"], 3.3333)
         self.assertEqual(data["algorithms"]["bfs"]["cost"], 4.4444)       # weighted cost, not BFS's 0
         self.assertEqual(data["algorithms"]["dijkstra"]["compute_time_s"], 0.1235)
         self.assertIsNone(data["algorithms"]["astar"]["time_saved_s"])    # filled in by the pipeline
-        self.assertEqual((data["n_corners"], data["coordinate_scale"]), (15, 0.3))
-
-    def test_save_output_round_trip(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "x.json"
-            save_output({"a": [1, 2]}, path, LOG)
-            with open(path) as f:
-                self.assertEqual(json.load(f), {"a": [1, 2]})
+        self.assertEqual((data["n_corners"], data["coordinate_scale"]), (15, 0.1))
+        self.assertEqual(data["fastest_lap"], lap)
 
 
 if __name__ == "__main__":

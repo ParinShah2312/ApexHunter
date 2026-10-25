@@ -145,8 +145,9 @@ from components.cv_feed import render_cv_feed
 from components.ai_analysis import render_ai_analysis
 from components.data_loader import load_mistake_data, load_mistake_meta, load_racing_line, load_tyre_prediction, get_lap_boundaries, assign_lap_numbers
 from components.racing_line import render_racing_line
+from components.scrubber import render_master_scrubber
 from components.bigdata_tab import render_bigdata_tab
-from components.header_bar import _parse_session_label
+from components.header_bar import session_from_file
 
 # ── Step 1: Sidebar ───────────────────────────────────────────────────────────
 sel = render_sidebar()
@@ -161,7 +162,7 @@ racing_line_data = load_racing_line(sel.racing_line_path)
 tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
 # ── Step 2b: Assign lap numbers to mistake data ──────────────────────────────
-round_num, session_type = _parse_session_label(sel.session_label)
+round_num, session_type = session_from_file(sel.session_filepath)
 lap_boundaries = get_lap_boundaries(sel.year, round_num, session_type, sel.driver_number)
 if df_mistakes is not None and lap_boundaries:
     df_mistakes = assign_lap_numbers(df_mistakes, lap_boundaries)
@@ -191,29 +192,8 @@ with tab1:
         formatted_gap = gap_dt.strftime('%H:%M:%S.%f')[:-5]
         st.info(f"Telemetry data for this session begins at **{formatted_gap}**. *This initial gap typically occurs because the driver was waiting in the garage before their first out-lap.*", icon="ℹ️")
 
-    base_date = datetime.datetime(2000, 1, 1)
-    min_dt = base_date + datetime.timedelta(seconds=min_t)
-    max_dt = base_date + datetime.timedelta(seconds=max_t)
-
-    # Initialize scrub_dt if needed
-    if "scrub_dt" not in st.session_state:
-        st.session_state["scrub_dt"] = base_date + datetime.timedelta(seconds=st.session_state.get("scrub_seconds", max_t))
-
-    # Clamp session state value to valid range
-    st.session_state["scrub_dt"] = max(min_dt, min(st.session_state["scrub_dt"], max_dt))
-
-    selected_dt = st.slider(
-        "Master session time",
-        min_value=min_dt,
-        max_value=max_dt,
-        format="HH:mm:ss.S",
-        key="scrub_dt",
-        label_visibility="collapsed",
-        step=datetime.timedelta(milliseconds=100)
-    )
-
-    # Sync back to scrub_seconds so the rest of the code works
-    st.session_state["scrub_seconds"] = (selected_dt - base_date).total_seconds()
+    # Shares st.session_state["scrub_seconds"] with the Telemetry-tab slider (components/scrubber.py)
+    render_master_scrubber(min_t, max_t)
 
     st.markdown("---")
 
@@ -221,7 +201,8 @@ with tab1:
 
     with col_left:
         scrub = st.session_state.get("scrub_seconds", 0.0)
-        render_cv_feed(scrub_seconds=scrub, min_t=min_t)
+        render_cv_feed(scrub_seconds=scrub, year=sel.year, round_num=round_num,
+                       session_type=session_type, driver_number=sel.driver_number)
 
     with col_right:
         st.markdown("**LIVE TRACK MAP**")

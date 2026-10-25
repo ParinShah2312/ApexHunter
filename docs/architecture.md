@@ -14,10 +14,14 @@ YouTube ─► edited_videos/ ─► cv_frames/ ─► YOLOv11-Seg ─► proces
 ## 1. Extract
 **`backend/scripts/etl/download_season_data.py`** (`python backend/scripts/etl/download_season_data.py`). It loops seasons → rounds → Q/R sessions, pulls per-driver telemetry with
 FastF1, and writes one Parquet per session to `data_lake/season_data/`. Existing files are skipped
-and API calls are cached in `cache/`.
+and API calls are cached in `cache/`. Season years from `config.json` are converted to integers
+for FastF1; a season whose schedule cannot be fetched is skipped and reported. The run ends with a
+per-outcome summary and exits with code 1 if any session failed or was only partly downloaded.
 
-Videos come from `etl/download_manual_videos.py` (yt-dlp) and are trimmed by hand into
-`edited_videos/`. Satellite images come from `etl/download_satellite_images.py`.
+Videos are downloaded with yt-dlp into `downloaded_videos/{year}/` by `etl/download_manual_videos.py`,
+one batch at a time: `manual_downloads` in `config.json` holds a year and name → URL pairs (the 46
+videos were collected in batches of six; the config keeps the last one, 2024 rounds 19–24). A file
+is replaced only after its download succeeds and are trimmed by hand into `edited_videos/`. Satellite images come from `etl/download_satellite_images.py`.
 
 ## 2. Transform
 **`etl/clean_telemetry.py`** (pandas) and its Spark counterpart
@@ -39,12 +43,16 @@ the 506 frames used for annotation.
 | YOLOv11-Seg apex detection (DL) | `cv/run_inference.py` (+ `cv/extract_turns.py` for FastF1 corner windows) | `processed_video/*_HUD.mp4`, `processed_csv/*_metrics.csv`, `processed_csv/*_turns.json` |
 
 ## 4. Store (optional infrastructure)
-`bigdata/hdfs_manager.py` mirrors the Parquet layers to HDFS. `bigdata/mongo_manager.py` stores
+`bigdata/hdfs_manager.py` mirrors the Parquet layers to HDFS. Spark's partitioned output goes to
+its own `clean_data_spark` folder (locally and on HDFS), separate from the pandas `clean_data`. `bigdata/mongo_manager.py` stores
 mistake summaries and session metadata in MongoDB. Both write JSON status files to `data_lake/`
 for the dashboard.
 
 ## 5. Serve
 **`frontend/app.py`** (`streamlit run frontend/app.py`) reads only from `data_lake/` and `models/`
 outputs, plus FastF1 lap metadata from the local cache. Loads are cached with `@st.cache_data`.
+One session-time position (`st.session_state["scrub_seconds"]`, managed by
+`components/scrubber.py`) drives every tab; the master scrubber and the Telemetry-tab slider are
+two linked widgets on it.
 
 See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for details and current limitations.

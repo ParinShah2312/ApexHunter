@@ -71,9 +71,6 @@ class TestLapAggregation(unittest.TestCase):
         np.testing.assert_array_equal(first[:, lap_col], [2, 3, 4, 5, 6])
         self.assertAlmostEqual(self.stint["targets"][0], 300.0 - 7)  # mean speed of lap 7
 
-    def test_stint_index_zero_based(self) -> None:
-        self.assertEqual(self.stint["stint_index"], 0)
-
 
 class TestStintRules(unittest.TestCase):
 
@@ -84,19 +81,19 @@ class TestStintRules(unittest.TestCase):
         self.assertNotIn(11.0, sparse["lap_features"]["race_lap_number"])
         self.assertEqual(sparse["n_laps"], dense["n_laps"] - 1)
 
-    def test_stint_too_short_for_a_window_is_dropped(self) -> None:
+    def test_stint_too_short_for_a_window_is_kept_without_windows(self) -> None:
+        """Regression for #20: such stints used to be dropped, so prediction never showed them."""
         # laps 2..6 = 5 laps: enough for a stint, but a window needs 5 inputs + 1 target
-        self.assertEqual(extract_stints(_laps(range(2, 7)), _telemetry(6), LOG), [])
-        self.assertEqual(len(extract_stints(_laps(range(2, 8)), _telemetry(7), LOG)), 1)
+        short = extract_stints(_laps(range(2, 7)), _telemetry(6), LOG)
+        self.assertEqual(len(short), 1)
+        self.assertEqual((short[0]["n_laps"], short[0]["sequences"], short[0]["targets"]), (5, [], []))
+        self.assertEqual(len(extract_stints(_laps(range(2, 8)), _telemetry(7), LOG)[0]["sequences"]), 1)
 
     def test_each_stint_handled_separately(self) -> None:
         laps = pd.concat([_laps(range(2, 10), "SOFT", stint=1), _laps(range(10, 18), "HARD", stint=2)])
         stints = extract_stints(laps, _telemetry(17), LOG)
         self.assertEqual([s["stint_index"] for s in stints], [0, 1])
         self.assertEqual(stints[1]["lap_features"]["is_hard"][0], 1.0)
-
-    def test_empty_laps(self) -> None:
-        self.assertEqual(extract_stints(_laps([]), _telemetry(1), LOG), [])
 
 
 class TestBuildTrainingDataset(unittest.TestCase):

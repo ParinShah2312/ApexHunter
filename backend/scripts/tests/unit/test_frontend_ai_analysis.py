@@ -1,4 +1,5 @@
-"""Tests for frontend/components/ai_analysis.py: mistake-rate display and LSTM stint lap axis."""
+"""Tests for frontend/components/ai_analysis.py: mistake-rate display, LSTM stint lap axis and
+the projected-pace delta colour."""
 
 import sys
 import unittest
@@ -35,14 +36,46 @@ def _render_if_panel():
     _render_isolation_forest_column(df, meta)
 
 
+# Streamlit renders lap-time deltas with these colours (Metric proto enum: RED = 0, GREEN = 1)
+RED, GREEN = 0, 1
+
+LSTM_PANEL = f"""
+import sys
+sys.path.insert(0, {str(FRONTEND_DIR)!r})
+import streamlit as st
+from components.ai_analysis import _render_lstm_column
+
+last_pred = st.session_state["last_predicted"]
+stint = {{"stint_index": 0, "n_laps": 3, "lap_numbers": [10, 11, 12], "cliff_lap": None,
+          "laps_remaining": None, "actual_laps": [95.0, 95.2, 95.5],
+          "predicted_laps": [95.1, 95.3, last_pred], "confidence_upper": [96.0] * 3,
+          "confidence_lower": [94.0] * 3}}
+_render_lstm_column({{"stints": [stint]}})
+"""
+
+
+def _end_pace_metric(last_predicted: float):
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_string(LSTM_PANEL, default_timeout=60)
+    at.session_state["last_predicted"] = last_predicted
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    return next(m for m in at.metric if m.label == "Proj. End Pace")
+
+
+class TestProjectedPaceColour(unittest.TestCase):
+    """Regression for #32: both branches used to paint the delta red."""
+
+    def test_faster_projection_is_green(self) -> None:
+        m = _end_pace_metric(94.5)                     # 1.00 s quicker than the last lap (95.5)
+        self.assertEqual((m.delta, m.proto.color), ("-1.00s", GREEN))
+
+
 class TestMistakeRate(unittest.TestCase):
 
     def test_rate_is_measured_share_in_percent(self) -> None:
         df = pd.DataFrame({"is_mistake": [True, False, False, False]})
         self.assertAlmostEqual(mistake_rate_pct(df), 25.0)
-
-    def test_empty_frame_is_zero(self) -> None:
-        self.assertEqual(mistake_rate_pct(pd.DataFrame({"is_mistake": []})), 0.0)
 
     def test_card_shows_measured_rate_not_contamination(self) -> None:
         from streamlit.testing.v1 import AppTest

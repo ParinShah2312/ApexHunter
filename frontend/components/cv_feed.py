@@ -4,13 +4,13 @@ Renders the YOLO-processed video player, status badge, and CV stat cards.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from config import PROCESSED_CSV_DIR, PROCESSED_VIDEO_DIR
-from components.data_loader import load_cv_metrics, load_turn_windows
+from components.data_loader import load_cv_metrics, load_turn_windows, load_video_lap
 
 
 def _find_available_videos() -> List[Path]:
@@ -24,6 +24,26 @@ def _get_current_status(df_cv: pd.DataFrame, scrub_seconds: float) -> str:
     """Return the apex status string for the frame closest to scrub_seconds."""
     closest_idx = (df_cv["timestamp_sec"] - scrub_seconds).abs().idxmin()
     return str(df_cv.loc[closest_idx, "status"])
+
+
+def video_time_for(scrub_seconds: float, video_lap: Optional[dict], year: int, round_num: int,
+                   session_type: str, driver_number: str) -> Optional[float]:
+    """Map the session-time scrubber onto the processed video, or None if it can't be.
+
+    The video shows one lap (video_lap: year, round, session, driver_number, lap_start_s,
+    lap_end_s, video_offset_s). Only when that session and driver are selected and the scrubber is
+    inside the lap is the video time = scrub - lap start + video offset. The old mapping
+    (scrub - start of the selected session's telemetry) gave times far past the end of the video,
+    so the badge always showed the last frame.
+    """
+    if video_lap is None:
+        return None
+    same_lap = (int(video_lap["year"]) == int(year) and int(video_lap["round"]) == int(round_num)
+                and video_lap["session"] == session_type
+                and str(video_lap["driver_number"]) == str(driver_number))
+    if not same_lap or not video_lap["lap_start_s"] <= scrub_seconds <= video_lap["lap_end_s"]:
+        return None
+    return scrub_seconds - video_lap["lap_start_s"] + video_lap["video_offset_s"]
 
 
 def _status_badge_html(status: str) -> str:
@@ -57,7 +77,8 @@ def _render_proportion_bar(hitting: int, near: int, wide: int, missing: int, tot
     )
 
 
-def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
+def render_cv_feed(scrub_seconds: float, year: int, round_num: int, session_type: str,
+                   driver_number: str) -> None:
     """Renders the CV video feed panel with status badge and stat cards."""
     mp4_files = _find_available_videos()
     if not mp4_files:
@@ -70,15 +91,24 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
 
     csv_name = selected_filename.replace("_HUD.mp4", "_metrics.csv")
     csv_path = PROCESSED_CSV_DIR / csv_name
-    df_cv = load_cv_metrics(str(csv_path))
+    # mtime in the cache key: a re-processed video's CSV used to be served stale until restart
+    df_cv = load_cv_metrics(str(csv_path), mtime=csv_path.stat().st_mtime if csv_path.exists() else 0)
+    turns_path = str(PROCESSED_CSV_DIR / selected_filename.replace("_HUD.mp4", "_turns.json"))
+    video_lap = load_video_lap(turns_path)
+    video_t = video_time_for(scrub_seconds, video_lap, year, round_num, session_type, driver_number)
 
-    # Convert absolute session time to lap-relative video time (0-100s)
-    video_scrub = max(0.0, scrub_seconds - min_t)
-
-    # Status badge
-    if df_cv is not None and not df_cv.empty:
-        current_status = _get_current_status(df_cv, video_scrub)
+    # Status badge: the frame at the scrubber's moment, when the scrubber is inside the video's lap
+    if df_cv is not None and not df_cv.empty and video_t is not None:
+        current_status = _get_current_status(df_cv, video_t)
         st.markdown(_status_badge_html(current_status), unsafe_allow_html=True)
+    elif df_cv is not None and not df_cv.empty:
+        if video_lap is None:
+            hint = "re-run cv/run_inference.py to record which lap this video shows"
+        else:
+            hint = (f"this video is {video_lap['year']} round {video_lap['round']} qualifying, "
+                    f"car #{video_lap['driver_number']}; select it and move the scrubber into that lap")
+        st.markdown(_status_badge_html("Not in this lap"), unsafe_allow_html=True)
+        st.caption(f"Live status follows the scrubber only inside the video's lap: {hint}.")
     else:
         st.markdown(
             '<div style="display:inline-block;padding:4px 12px;border-radius:4px;'
@@ -118,7 +148,7 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
         st.markdown("---")
         st.subheader("📋 Turn-by-Turn Report Card")
 
-        turns = load_turn_windows(str(PROCESSED_CSV_DIR / selected_filename.replace("_HUD.mp4", "_turns.json")))
+        turns = load_turn_windows(turns_path)
         if turns is None:
             st.info("No turn windows for this video. Re-run cv/run_inference.py with --video-offset "
                     "to generate them from FastF1 circuit data.")
@@ -131,18 +161,12 @@ def render_cv_feed(scrub_seconds: float, min_t: float = 0.0) -> None:
             df_turn_valid = df_turn.dropna(subset=['distance_cm'])
 
             if not df_turn_valid.empty:
-                min_dist = df_turn_valid['distance_cm'].min()
-
-                # Evaluate corner success by their closest point to the apex,
-                # not the average of the whole 3-second corner entry/exit
-                if min_dist <= 30.0:
-                    dominant_status = "Hitting Apex"
-                elif min_dist <= 60.0:
-                    dominant_status = "Near Apex"
-                elif min_dist <= 150.0:
-                    dominant_status = "Wide Line"
-                else:
-                    dominant_status = "Missing Apex"
+                # Rate the corner by its closest approach, using the status the backend gave that
+                # frame (pixel thresholds scaled by corner speed). The card used to apply its own
+                # 30/60/150 cm cut-offs, which disagreed with the per-frame classification.
+                closest = df_turn_valid['distance_cm'].idxmin()
+                min_dist = df_turn_valid.loc[closest, 'distance_cm']
+                dominant_status = str(df_turn_valid.loc[closest, 'status'])
             else:
                 min_dist = float('nan')
                 dominant_status = "No Data"

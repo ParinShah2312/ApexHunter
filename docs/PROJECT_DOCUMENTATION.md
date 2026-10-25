@@ -120,11 +120,11 @@ backend/
     isolation_forest/         mistakes_features, mistakes_model, mistakes_io
     lstm/                     tyre_data, tyre_model, tyre_io
     racing_line/              racing_line_grid, racing_line_search, racing_line_io
-    tests/                    unit/ (25 files), integration/ (8 files), run_tests.py
+    tests/                    unit/ (23 files), integration/ (5 files), run_tests.py
 frontend/
   app.py, config.py
   components/                 sidebar, data_loader, header_bar, telemetry_charts, track_map,
-                              cv_feed, ai_analysis, racing_line, bigdata_tab, bigdata_charts
+                              cv_feed, ai_analysis, racing_line, bigdata_tab, bigdata_charts, scrubber
 models/                       best.pt (YOLO), tyre_lstm.pt, tyre_scaler.pkl, tyre_config.json
 data_lake/                    all data and model outputs (gitignored)
 docs/                         this document and supporting reports
@@ -196,11 +196,17 @@ They are stored in `data_lake/raw_images/satellite_maps/` but the dashboard does
 
 ## 4.1 Extract — `etl/download_season_data.py`
 
-For each configured season it reads the event schedule. For each round and each session type
+For each configured season it reads the event schedule (the years in `config.json` are strings and
+are converted to integers for FastF1); the highest round number is the season length. If the
+schedule cannot be fetched, that season is skipped and reported rather than guessed. For each
+round and each session type
 (`Q`, `R`) it then loads the session with `fastf1` (`telemetry=True, laps=True, weather=False`) and
 calls `laps.pick_drivers(d).get_telemetry()` for every driver. It keeps the 14 columns listed in §3.1
 (without `Time`) and writes `data_lake/season_data/{year}_{round}_{type}.parquet`. Sessions whose
-file already exists are skipped. API responses are cached in `cache/`.
+file already exists are skipped. API responses are cached in `cache/`. At the end the script
+logs a count per outcome (saved, skipped, empty, partial, failed), lists any failed or partial
+sessions, and exits with code 1 if there were any. A *partial* file (some drivers failed to load)
+is still saved; delete it and re-run to retry those drivers.
 
 ## 4.2 Transform — `etl/clean_telemetry.py` (pandas)
 
@@ -211,32 +217,43 @@ file already exists are skipped. API responses are cached in `cache/`.
 | 3 | Forward-fill all numeric columns |
 | 4 | Clip Speed 0–380, RPM 0–15,000, Throttle 0–100, Brake 0–1 (binary flag) |
 | 5 | Downcast Speed, RPM, Throttle, Brake, X, Y to `float32` |
-| 6 | Write snappy Parquet to `data_lake/clean_data/` (skips files that already exist) |
+| 6 | Write snappy Parquet to `data_lake/clean_data/` (via a temporary file renamed on completion; skips files that already exist) |
 
 ## 4.3 Spark equivalent — `bigdata/spark_clean_telemetry.py`
 
 The same transformation written in PySpark 3.5.1 (`local[*]`, 4 GB driver memory). It reads either
-local `season_data/` or `hdfs://localhost:9000/apexhunter/season_data`. Forward-fill uses
-`last(..., ignorenulls=True)` over a window partitioned by driver and ordered by `SessionTime`.
-Output is Parquet partitioned by `Year/Round/Session`. The last recorded run (HDFS mode) processed
-57,874,119 rows in 78 s and wrote 1,740 MB. A run log is written to `data_lake/spark_run_log.json`.
+local `season_data/` (as a `file:///` URI, because an installed Hadoop makes HDFS the default file
+system) or `hdfs://localhost:9000/apexhunter/season_data`. Forward-fill uses
+`last(..., ignorenulls=True)` over a window partitioned by year, round, session and driver and
+ordered by `SessionTime`. Output is Parquet partitioned by `Year/Round/Session`, written to its own
+folder, `clean_data_spark` (local `data_lake/clean_data_spark/` or `/apexhunter/clean_data_spark`),
+never into the pandas `clean_data` folder. The last recorded run (HDFS mode, May 2026, before these
+fixes) processed 57,874,119 rows in 78 s and wrote 1,740 MB; a local run after the fixes processed
+the same 92 files and rows in 99 s. A run log is written to `data_lake/spark_run_log.json`, and a
+failed run exits with code 1.
 `etl/fix_parquet_timestamps.py` rewrites Parquet timestamps to microsecond precision so that Spark
 can read them.
 
 ## 4.4 Storage — HDFS and MongoDB
 
-- `bigdata/hdfs_manager.py` wraps `hadoop fs` commands to upload `season_data`, `clean_data` and
-  `mistake_data` to `/apexhunter/...`, verify uploads, and write `data_lake/hdfs_status.json`.
+- `bigdata/hdfs_manager.py` wraps `hadoop fs` commands to upload `season_data`, `clean_data` (the
+  pandas output) and `mistake_data` to `/apexhunter/...`, verify uploads, and write
+  `data_lake/hdfs_status.json`. The status lists files recursively and also covers Spark's
+  `/apexhunter/clean_data_spark`; folders and Hadoop marker files (`_SUCCESS`, `.crc`) are not
+  counted as files. The stored status (May 2026) predates this and still shows Spark's output in
+  `clean_data` as three "files" (`Year=2023`, `Year=2024`, `_SUCCESS`) until HDFS is re-run.
 - `bigdata/mongo_manager.py` (database `apexhunter` on `localhost:27017`) upserts:
-  - `mistake_annotations`: one document per session × driver, containing the Isolation Forest
-    metadata plus summary statistics (mean/std anomaly score, mistake rate, speeds).
+  - `mistake_annotations`: one document per session × driver (session keyed by file name, e.g.
+    `2023_1_R.parquet`), containing the Isolation Forest metadata plus summary statistics
+    (mean/std anomaly score, mistake rate, speeds).
   - `telemetry_sessions`: one metadata document per session file (92 documents).
 
   It also provides query helpers (leaderboard, per-driver history) and writes
-  `data_lake/mongo_status.json`.
+  `data_lake/mongo_status.json`. One MongoDB client is shared per process.
 
 These systems are optional at runtime. The dashboard reads their JSON status files and falls back
-gracefully when HDFS or MongoDB are offline.
+gracefully when HDFS or MongoDB are offline; it checks whether MongoDB is reachable at most once a
+minute, so an offline MongoDB does not slow down every interaction.
 
 ---
 
@@ -251,12 +268,19 @@ EDA lives in the dashboard (Telemetry and Big Data tabs):
 - Speed distribution histograms for the five drivers with the most samples.
 - Pearson correlation heatmap of Speed, RPM, Throttle, Brake, X, Y, Z and nGear.
 - Speed vs RPM scatter coloured by gear, which shows the gear-ratio bands.
-- Brake/throttle overlap percentage per driver.
+- Brake/throttle overlap percentage for the selected driver (share of samples at ≥ 50 km/h with
+  the brake on and throttle > 5 %; slower samples are excluded because in the garage, pit box or
+  on the grid both pedals are often held on purpose).
 
 ## 5.2 Driver mistake detection — Isolation Forest
 
 **Files:** `detect_mistakes.py`, `isolation_forest/mistakes_features.py`, `mistakes_model.py`,
 `mistakes_io.py`
+
+> **Status:** this section describes the current (last-semester) method, which has known flaws
+> (§8 #3). It is being replaced by the rework designed in
+> [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md); this section is rewritten when the
+> rework lands.
 
 ### Idea
 Isolation Forest is an unsupervised anomaly detector. It builds random trees that split on random
@@ -335,33 +359,60 @@ the optimisation part of the pipeline.
   share of the cell's samples with the brake on (0–1). Faster cells are cheaper; cells where the
   driver is usually braking are more expensive.
 - 8-connected grid. Edge cost = average of the two node costs × (1 for orthogonal, √2 for diagonal moves).
-- A metres-per-unit scale is derived by comparing telemetry arc length per lap with the known
-  circuit length (`--circuit-length`, default Bahrain 5.412 km).
+- Distances are converted to metres with FastF1's documented position unit: X/Y are in 1/10 m,
+  so the scale is a constant 0.1 m per unit for every circuit. We checked this by integrating
+  speed over fastest laps at Bahrain, Monaco, Silverstone and Spa (0.0996–0.1006 m/unit).
 
 ### Search
-- The driver's fastest lap is located with FastF1. The search is split into four legs between five
-  waypoints taken at 0, ¼, ½, ¾ and the end of that lap, and the legs are concatenated.
+- The driver's fastest lap is taken from FastF1 (`laps.pick_drivers(driver).pick_fastest()`) and
+  the telemetry is sliced to that lap's start and end times. If FastF1 has no valid fastest lap
+  for the driver, the run stops with an error; it never falls back to the whole session.
+- The search is split into four legs between five waypoints taken at 0, ¼, ½, ¾ and the end of
+  that lap, and the legs are concatenated.
 - **A\***: heuristic = Euclidean grid distance × minimum node cost. This never overestimates, so A\*
   is optimal.
 - **Dijkstra**: the same search with h = 0. It is the ground-truth check for A\*.
 - **BFS**: ignores costs and finds the fewest hops. Its weighted cost is computed afterwards for comparison.
 
+### Time estimate
+A path's time is estimated by splitting it into segments and dividing each segment's length by
+the speed of the nearest sample of the driver's fastest lap. The driver's own full-resolution lap
+is timed the same way, and "time saved" = driver estimate − path estimate (positive = faster).
+Because both use the same speeds, the comparison is like-for-like. Applied to the driver's lap,
+the estimate is within about 1 % of the real lap time, so smaller differences are noise.
+
 ### Outputs
 `data_lake/racing_lines/{session}_{driver}_racing_line.json` contains the driver's fastest-lap path
-(every 10th sample), and for each algorithm: path, cost, nodes expanded, compute time, estimated time
-saved and a found flag. It also holds per-segment deviation between the A\* path and the driver path.
+(every 10th sample), the FastF1 lap it came from (`fastest_lap`: lap number, lap time, measured
+length in km, and `estimated_time_s`, the time estimate applied to that lap), the scale (`coordinate_scale`, 0.1), and for each algorithm: path, cost, nodes
+expanded, compute time, estimated time saved and a found flag. It also holds per-segment deviation
+between the A\* path and the driver path.
 
-### Current results — to be regenerated
-The stored output for 2023 Bahrain qualifying (driver #1) is **not valid** and is not quoted here.
-It was generated while the fastest-lap lookup was failing, so the search silently used the whole
-session instead of the fastest lap (roadmap #19), and the metres-per-unit scale for qualifying
-sessions is about 3× too large (roadmap #18: 0.303 instead of ≈0.10 m/unit). Results will be added
-after both bugs are fixed and the output is regenerated. A\* and Dijkstra agreeing on cost
-(optimality check) holds in the unit tests regardless.
+### Current results — 2023 Bahrain qualifying, driver #1 (Verstappen)
+Fastest lap from FastF1: lap 14, 89.708 s (his pole time), 5.34 km of driven path (official
+circuit length 5.412 km). Grid: 1,398 cells at resolution 50 (5 m).
+
+| Algorithm | Path cost | Nodes expanded |
+|---|---|---|
+| A\* | 966.88 | 2,616 |
+| Dijkstra | 966.88 | 2,723 |
+| BFS (fewest hops) | 990.38 | 2,707 |
+
+- A\* and Dijkstra find the same optimal cost; A\* expands about 4 % fewer nodes. BFS ignores
+  cell costs, so its path is 2.4 % more expensive.
+- The driver path has 66 points; the A\* path has 991 cells, about 5.34 km long.
+- Deviation between the A\* path and the driver's line is 0.4–1.3 m per segment, which is within
+  one 5 m grid cell.
+- Time estimate check: the driver's lap is estimated at 88.76 s against the real 89.708 s (1 % low).
+- Estimated time saved: A\* and Dijkstra −0.08 s, BFS −0.10 s, i.e. about 0.1 % slower than the
+  driver and well inside the estimate's ~1 % error. **The search finds no faster line** through
+  the driver's own telemetry footprint. This is expected: the graph only contains cells the
+  driver already drove, and the node cost (speed and braking) is not a lap-time model, so the
+  "optimal" path mostly retraces the driver's line (median 2.4 m from it).
 
 ### Usage
 ```bash
-python backend/scripts/optimal_line.py --session data_lake/clean_data/2023_1_Q.parquet --driver 1 [--resolution 50] [--circuit-length 5.412] [--n-corners 16] [--force]
+python backend/scripts/optimal_line.py --session data_lake/clean_data/2023_1_Q.parquet --driver 1 [--resolution 50] [--n-corners 16] [--force]
 ```
 
 ---
@@ -423,14 +474,19 @@ restored at the end, so the saved model is the one that achieved the reported va
   the confidence band.
 - Predicted mean speed is converted to lap time with an estimated lap distance (mean speed × lap
   time over the stint's valid laps).
-- The cliff lap is the first lap after the best predicted lap whose predicted time exceeds the best
-  by more than 1.5 s. `laps_remaining` = stint length − cliff lap.
-- Predictions are made for every representative lap of a stint. The first lap's prediction is
-  seeded by padding with that lap's own features.
+- A lap is predicted only when the 5 laps before it are consecutive representative laps, the same
+  rule as the training windows. The first 5 laps of a stint, and the 5 laps after any removed lap
+  (e.g. a safety-car period), have no prediction (`null`). The model is therefore never fed padding
+  or a window that skips a lap, and no lap is predicted from its own data.
+- Every stint with at least 3 representative laps is reported, including stints too short for any
+  prediction (actual lap times only). Across 8 races (2023–24 R1–R4) 51 of 391 stints (13 %) are
+  like this, e.g. Verstappen's first stint in the red-flagged 2023 Australian GP.
+- The cliff lap is the first predicted lap after the best predicted lap whose predicted time exceeds
+  the best by more than 1.5 s. `laps_remaining` = stint length − cliff lap.
 - Output: `data_lake/tyre_predictions/{session}_{driver}_tyre.json` with one entry per stint:
   `stint_index`, `n_laps`, `lap_numbers` (race lap number of each kept lap; numbers can skip removed
-  laps), `actual_laps`, `predicted_laps`, `confidence_upper`, `confidence_lower`,
-  `cliff_lap`, `laps_remaining`.
+  laps), `actual_laps`, `predicted_laps`, `confidence_upper`, `confidence_lower` (the last three
+  `null` for laps without a 5-lap history), `cliff_lap`, `laps_remaining`.
 
 ### Model compatibility
 `tyre_config.json` records the feature names the model was trained on. Before loading,
@@ -503,8 +559,9 @@ corners (it found 11 of Bahrain's 15).
 
 ### Inference pipeline (`run_inference.py`)
 For every video frame:
-1. YOLO prediction (confidence 0.25) produces curb and road masks.
-2. **Masking:** masks are resized to the frame and drawn into a colour overlay (curb red, road
+1. YOLO prediction (confidence 0.25, `retina_masks=True`) produces curb and road masks at the
+   frame's full resolution, with the network's letterbox padding removed.
+2. **Masking:** masks are drawn into a colour overlay (curb red, road
    green). Curb contours on the wrong side of the screen for the expected turn direction are
    discarded (except in fast corners), and the largest remaining contour is kept.
 3. **Geometry:** the contour's inner (track-side) edge is extracted. The minimum Euclidean distance
@@ -523,7 +580,9 @@ For every video frame:
 
 Outputs:
 - `data_lake/processed_video/{video}_HUD.mp4`
-- `data_lake/processed_csv/{video}_turns.json`: the turn windows used for this run.
+- `data_lake/processed_csv/{video}_turns.json`: the turn windows used for this run, the video
+  offset, and which lap the video shows (`lap`: year, round, session, driver, driver number, and the
+  lap's start/end in session seconds; for Bahrain 2024: 4,354.1–4,443.3 s).
 - `data_lake/processed_csv/{video}_metrics.csv` with columns `frame_number, timestamp_sec,
   distance_cm, status, has_curb`. `distance_cm` is the pixel distance × 0.155, an approximate
   calibration.
@@ -533,14 +592,17 @@ Outputs:
 | Status | Frames |
 |---|---|
 | Straight | 3,241 |
-| Missing Apex | 497 |
-| Tracking | 447 |
-| Near Apex | 357 |
-| Hitting Apex | 276 |
+| Missing Apex | 512 |
+| Tracking | 448 |
+| Near Apex | 343 |
+| Hitting Apex | 274 |
 | Wide Line | 99 |
 
-Turn-by-turn (closest approach per corner): 12 of 15 corners "Hitting Apex" (≤ 30 cm) and 3 "Near
-Apex" (T5, T9, T15). The processed video is the 2024 one (confirmed by frame comparison); an older
+Turn-by-turn report card: each corner is rated by the status of its closest-approach frame (the
+same per-frame thresholds as above). 12 of 15 corners "Hitting Apex", T5 "Near Apex" (33 cm, fast
+corner), T9 and T15 "Missing Apex" (38 and 51 cm in medium corners, where "near" ends at 250 px ≈
+39 cm). Before #35 the card used its own 30/60/150 cm cut-offs and showed T9 and T15 as "Near
+Apex". Regenerated in Oct 2026 after the mask-alignment fix (#26); 66 frames (1.3 %) changed status. The processed video is the 2024 one (confirmed by frame comparison); an older
 code comment had labelled the hand-typed windows "Bahrain 2023".
 
 ### Usage
@@ -561,8 +623,8 @@ python backend/scripts/cv/run_inference.py --input "data_lake/edited_videos/2024
 |---|---|
 | Sidebar | Year → Session → Driver selectors, plus green/grey status dots showing whether Isolation Forest, LSTM and racing-line outputs exist for the selection |
 | Header | Track name, fastest lap (FastF1), top speed, driver number/name/team |
-| 🏎 Race Intelligence | Master session-time scrubber; processed CV video with live apex-status badge, status counts and a turn-by-turn report card; track map in Speed or Mistakes mode with a lap selector |
-| 📊 Telemetry | Speed/Throttle/Brake (on/off)/Gear/RPM subplots with a scrubber line; top speed and brake-overlap % (brake on and throttle > 5 %) |
+| 🏎 Race Intelligence | Master session-time scrubber (linked to the Telemetry-tab slider: moving either moves both, and every tab uses that time); processed CV video with an apex-status badge that follows the scrubber while it is inside the video's lap (select that session and driver; otherwise it shows "Not in this lap"), status counts and a turn-by-turn report card; track map in Speed or Mistakes mode with a lap selector |
+| 📊 Telemetry | Speed/Throttle/Brake (on/off)/Gear/RPM subplots with a scrubber line; top speed and brake-overlap % (brake on and throttle > 5 %, counted over samples at ≥ 50 km/h) |
 | 🧠 AI Analysis | Isolation Forest track map with mistake markers per lap, plus anomalies, mistakes under braking and measured mistake rate for the selected lap; LSTM stint chart with predicted pace, confidence band and cliff marker |
 | 🛣 Racing Line | Track outline with the driver's fastest lap and the selected algorithm's path; deviation per turn |
 | 🗄️ Big Data | Pipeline DAG, HDFS and Spark statistics from the JSON logs, EDA charts for the selected session, LSTM and pathfinding summaries, live MongoDB leaderboard |
@@ -574,11 +636,20 @@ python backend/scripts/cv/run_inference.py --input "data_lake/edited_videos/2024
 This section is kept up to date as fixes are made. Which issues will be fixed, and in what order,
 is decided in [ROADMAP.md](ROADMAP.md).
 
+### Progress and next steps (Oct 2026)
+1. **Bug fixes: done.** All bugs found in the code review (ROADMAP #1–#40) are fixed, except the two
+   that belong to planned reworks (Isolation Forest #8/#9, LSTM features #22).
+2. **Test audit rounds 2–3: done** (only essential tests, no mocks; 145 tests, all passing).
+   **Next: the Isolation Forest rework + Z-score baseline** (DSML).
+3. Then the Ridge baseline (DSML), the LSTM rework with vanilla RNN vs LSTM and the LSTM
+   autoencoder (DL), outputs for more sessions, and finally the dashboard redesign.
+The step-by-step plan and the rules for working on the project are in ROADMAP §0 and §3.
+
 ### Working
 - Telemetry download and cleaning for all 92 sessions; Spark, HDFS and MongoDB integration (last run May 2026).
 - Isolation Forest, racing-line and CV inference pipelines run end to end.
 - Dashboard with all five tabs.
-- Unit test suite: 178 tests passing (230 including integration; the 4 failures are the known Isolation Forest issues #3/#10).
+- Test suite: 145 tests, all passing (127 unit + 18 integration); no mock tests (test audit rounds 2–3).
 
 ### Fixed
 - **Oct 2026 – Binary brake handling.** `Brake` is now treated as an on/off flag across cleaning
@@ -625,6 +696,130 @@ is decided in [ROADMAP.md](ROADMAP.md).
   spaced incl. first and last frame); racing-line start cells used a different grid origin from the
   grid; log lines with `→` were dropped on redirected Windows output (fixed for all scripts in
   `utils.setup_logger`); the racing line used FastF1's deprecated `pick_driver`.
+- **Oct 2026 – Racing-line scale and fastest lap (#18, #19).** The metres-per-unit scale was
+  estimated from the session length ÷ 90 s and a circuit length that defaulted to Bahrain, which
+  made qualifying scales about 3× too large. It is now FastF1's documented 1/10 m, and
+  `--circuit-length` is gone. The fastest-lap lookup used to fall back silently to the whole
+  session (the stored output had 3,071 path points from every lap); the run now stops instead,
+  and the output records which FastF1 lap was used. Unused start/end-node code was removed. The
+  2023 Bahrain qualifying output was regenerated.
+- **Oct 2026 – Season downloader (#25).** `config.json` stores the seasons as strings, which FastF1
+  rejects (`TypeError`), so every session failed and the error was only logged. Years are now
+  converted to integers. A failed schedule lookup used to fall back to 24 rounds (2023 had 22); the
+  season is now skipped and reported. Per-driver failures are counted, and the run ends with a
+  summary and a non-zero exit code when anything failed. Verified by re-downloading 2024 R1 Q
+  (identical to the stored file: 380,399 rows, 20 drivers).
+- **Oct 2026 – Linked time scrubbers (#31).** The master scrubber and the Telemetry-tab slider
+  kept separate values: after the first load the Telemetry slider ignored the master (so its chart
+  was cut at a different time from the "Session Time" card and scrub line), and moving the
+  Telemetry slider was overwritten by the master on the next rerun. Both sliders now share one
+  position (`components/scrubber.py`): moving either one updates the other through Streamlit
+  `on_change` callbacks, and the position is clamped when a shorter session is selected. The
+  card also rounded milliseconds down (1622.599 s showed as 27:02.598); it now rounds. Covered by
+  `test_frontend_scrubber.py`, which drives both sliders with Streamlit's AppTest.
+- **Oct 2026 – Projected-pace colour (#32).** The AI tab's "Proj. End Pace" delta was red whether
+  the projection was faster or slower: the code switched Streamlit's colour mode by the sign of the
+  delta, and both combinations render red. Lap-time deltas now always use the "inverse" mode
+  (faster = green, slower = red). Covered by an AppTest of the LSTM panel.
+- **Oct 2026 – Brake-overlap card (#33).** The Telemetry tab's "Brake Overlap" counted every
+  sample, including the car standing in the garage with the brake held and the throttle blipped.
+  Those samples dominated the figure (2023 R1 Q #1: 21.27 %; 2024 R1 Q #11: 6.05 %, where 1,447
+  of 1,541 overlap samples were at 0 km/h). It now counts only samples at ≥ 50 km/h (0.41 % and
+  0.67 %). The threshold barely matters between 0 and 80 km/h, because the remaining overlaps are
+  on-track moments, mostly the switch from throttle to brake. The card shows two decimals and
+  says which samples it counts.
+- **Oct 2026 – YOLO mask alignment (#26).** YOLO predicts on a 384×640 letterboxed image (with
+  grey padding bars). The masks were stretched straight onto the 1080×1920 frame without removing
+  that padding, so curb and road edges sat up to ~29 px from where YOLO had actually found them
+  (curb-mask overlap with the true outline as low as IoU 0.41). Inference now uses
+  `retina_masks=True`, which returns full-resolution masks with the padding removed (IoU 1.00
+  against YOLO's own outlines on every mask checked). The Bahrain video was re-processed: 66 of
+  4,917 frames changed status, the median apex distance changed by 1 cm, and the turn-by-turn
+  results stayed the same (12 "Hitting Apex", 3 "Near Apex").
+- **Oct 2026 – Racing-line time estimate (#39).** "Time saved" was path length ÷ mean speed of the
+  cells along the path, with cell speeds averaged over the whole session (out-laps and in-laps
+  included). That estimated Verstappen's 89.7 s pole lap at about 110 s and rewarded A\* simply for
+  passing through fast cells, giving about +9 s, hidden by a ±5 s clamp (5.0 for all three
+  algorithms). Paths are now timed segment by segment with the speed of the nearest fastest-lap
+  sample, the driver's lap is timed the same way, and the clamp is gone. The driver's lap is now
+  estimated within 1 % (88.76 s); the algorithms come out 0.08–0.10 s slower than the driver.
+- **Oct 2026 – LSTM prediction windows (#20, #21).** Prediction dropped every stint that could not
+  form a training window (13 % of race stints), and for the stints it kept, it predicted every lap by
+  padding the start with copies of the first lap and sliding across removed laps; the first lap's
+  prediction even used that lap's own data. These were fixed together because they live in the same
+  function: letting short stints through with the old windows would have produced predictions made
+  entirely of padding. Now training and prediction share one rule (`tyre_data.window_positions`): a
+  lap is predicted only from the 5 consecutive kept laps before it. Other laps are `null`, and short
+  stints are reported with their actual laps only. The dashboard charts skip `null` predictions.
+- **Oct 2026 – UTF-8 text files (#23).** On Windows, `open()` defaults to the cp1252 encoding, so
+  `config.json`'s "São Paulo Grand Prix" was read as "SÃ£o Paulo Grand Prix" (a satellite-image
+  re-run would have saved a second, misnamed copy). Every text-mode `open()` in the project now
+  passes `encoding="utf-8"`, and a unit test fails if a new one does not.
+- **Oct 2026 – Test runner skips (#24).** `run_tests.py --file` on an integration test ran it without
+  `APEXHUNTER_RUN_SLOW`, so all of its tests were skipped, yet the runner printed PASS and "All tests
+  passed". Integration files named with `--file` now run for real. The runner also reads
+  unittest's counts: the summary shows tests run and skipped, and a file whose tests were all
+  skipped is labelled SKIP instead of PASS.
+- **Oct 2026 – HDFS/Spark layout and status (#27, #40).** Spark wrote its partitioned output into the
+  same `clean_data` folder as the pandas files, both on HDFS and locally. Locally, `--force`
+  would have deleted the pandas folder that every model reads. Spark now writes to
+  `clean_data_spark`. The HDFS status listed folders and `_SUCCESS` as files; it now lists
+  real files recursively. Spark's forward-fill never ran (#40: a type-name check that never matched
+  in PySpark 3.5) and was grouped by driver only. It now runs within each driver's session, and
+  the pandas cleaner fills within each driver. The raw data has no missing values, so no
+  cleaned values change. Found on the way: local Spark mode had never worked on this machine
+  (Hadoop made `C:\...` paths resolve on HDFS), failed runs exited with code 0, and
+  `files_processed` was always 0. All fixed; verified by a local run (92 files, 57,874,119 rows,
+  pandas `clean_data` untouched). HDFS itself was not re-run.
+- **Oct 2026 – Manual video downloader (#28).** `etl/download_manual_videos.py` saved to
+  `data_lake/raw_video/`, a folder nothing reads; it now saves to `downloaded_videos/{year}/` with the
+  other videos. The config entry is one download batch (a year plus name → URL pairs); videos were
+  collected in batches of six. It also deleted the existing video before downloading the replacement, so a failed
+  download lost the file; it now downloads under a temporary name and replaces the old file only
+  on success.
+- **Oct 2026 – MongoDB handling (#29).** The Big Data tab pinged MongoDB on every rerun, so with
+  MongoDB off every click in the dashboard waited ~3 s and logged the same error (measured: 3.08 s
+  per rerun; now 0.01 s, re-checked once a minute). `mongo_manager` opened a new client for every
+  call and never closed them; it now shares one client per process. Mistake documents were keyed
+  by the session path exactly as typed (absolute and relative paths made duplicates); they are
+  now keyed by file name, and an upload removes older copies stored under a full path.
+- **Oct 2026 – CV and ETL robustness (#30).** A crashed or interrupted `run_inference` left partial
+  outputs that the next run treated as "already processed" (the check also ignored
+  `_turns.json`); partial outputs are now removed and all three files are required to skip. The
+  ETL scripts write Parquet to a temporary file and rename it when complete, so a crash cannot
+  leave a half-written file that is later skipped. The video frame rate is no longer truncated
+  to a whole number (the videos run at 50.00–50.01 fps; the timing effect was ≤ 0.01 s), frame
+  extraction can no longer divide by zero below 5 fps, the code's fallback apex thresholds now
+  equal `config.json` (130/250 px instead of 300/550), and two docstrings that still called the
+  FastF1 turn directions "hardcoded" were corrected. No outputs changed.
+- **Oct 2026 – Big Data tab charts (#34).** The "Speed Trace Overlay" drew the EDA sample in its
+  random (shuffled) order against a sample index, so it showed noise (median jump between plotted
+  points 93 km/h). It now sorts each driver's samples by session time, plots speed against session
+  time in minutes (median jump 2.6 km/h), breaks the line at time gaps over 10 s, and is titled
+  "Speed Over Session Time". The LSTM band labelled "95% CI" is mean ± 1 standard deviation of the
+  Monte Carlo dropout passes, and is now labelled "±1σ (MC dropout)".
+- **Oct 2026 – CV panel (#35).** The live status badge converted session time to video time by
+  subtracting the start of the selected session's telemetry, which gave times far past the end of
+  the 98 s video, so it always showed the last frame. The turn windows file now records which lap
+  the video shows and when it ran (from FastF1), and the badge maps the scrubber into the video
+  only when that session and driver are selected and the scrubber is inside the lap. The
+  turn-by-turn report card used its own centimetre cut-offs that disagreed with the per-frame
+  classification; each corner now takes the status of its closest-approach frame (T9 and T15
+  change from "Near Apex" to "Missing Apex").
+- **Oct 2026 – Dashboard edge cases (#36, #37).** The round and session type now come from the
+  session file name (`2024_1_Q.parquet`) instead of the label text, which fell back to Race when
+  the FastF1 schedule was unavailable. Failed FastF1 lookups (lap boundaries, event names, fastest
+  lap) are retried after 10 minutes instead of being cached until restart. The CV metrics are
+  reloaded when the CSV changes; empty telemetry no longer stops every tab; and chart
+  downsampling now works for 5,001–9,999 rows. Smaller presentation issues were moved to the UI
+  redesign (ROADMAP §E).
+- **Oct 2026 – Test audit round 2.** Only tests that guard real behaviour of main features were
+  kept (252 → 168 tests). The old Isolation Forest tests, including the two failing integration
+  files, were deleted; the rework writes their replacements. See `docs/TEST_AUDIT.md`.
+- **Oct 2026 – Test audit round 3 (no mocks).** The 12 mock-based tests were removed or replaced.
+  The racing-line and LSTM integration tests now run the real pipelines on real data (2023 Bahrain
+  qualifying; 2024 races 1–4 with real FastF1 laps), checking real values such as Verstappen's lap
+  14 / 89.708 s and LSTM lap-time predictions within 10 % (168 → 145 tests).
 - **Oct 2026 – Code cleanup.** Unused imports, variables, constants and two dead functions
   removed (`ruff check --select F` now passes).
 
@@ -634,14 +829,12 @@ is decided in [ROADMAP.md](ROADMAP.md).
 |---|---|---|
 | 2 | LSTM | The saved model predates the current 9-feature pipeline, so `predict_cliff.py` refuses to load it until it is retrained (deliberately deferred until other LSTM work is done). |
 | 3 | Isolation Forest | The CV criterion always selects the smallest contamination. The reference driver can be the target driver. |
-| 4 | CV | The CV panel is not linked to the selected session. YOLO training metrics are not in the repo. |
-| 5 | Racing line | The "time saved" estimate saturates at the ±5 s clamp. "Per-corner" deviation uses equal segments. Turn labels in the frontend are Bahrain-specific. The grid is built from all of the driver's session laps. |
+| 4 | CV | The video list is not filtered by the selected session (the live status badge only follows the scrubber for the video's own session and driver). YOLO training metrics are not in the repo. |
+| 5 | Racing line | The search graph only contains cells the driver drove and its node cost is not a lap-time model, so it cannot find a faster line (estimated time saved ≈ −0.1 s, within the 1 % error of the time estimate). "Per-corner" deviation uses equal segments. Turn labels in the frontend are Bahrain-specific. The grid is built from all of the driver's session laps. |
 | 6 | Outputs | Model outputs exist for only one session/driver each (mistakes and tyre: 2023 R1 race #1; racing line: 2023 R1 qualifying #1; CV: Bahrain pole lap). |
-| 8 | Spark | The numeric-column check compares type names without `()`, so the forward-fill step is skipped in PySpark 3.5. |
 | 9 | Misc | `Time` is synthesised from the row index. Satellite images are unused. Team mapping is not season-specific. |
-| 10 | Tests | 2 integration test files fail: `test_pipeline_schema` expects the old contamination grid and a removed meta key; `test_pipeline_correctness` catches only 1/11 injected anomalies (a symptom of #3). |
 | 11 | Logging | The Isolation Forest grid-search log prints contamination with 2 decimals, so 0.005 shows as "0.01" (the Windows encoding crash on `→` is fixed). |
-| 14 | Review (Oct 2026) | A full pre-commit review found further issues, logged as roadmap #18–#38. Most important: racing-line scale wrong for qualifying and silent full-session fallback (#18, #19); season downloader cannot download (string seasons, #25); YOLO masks vertically misaligned by up to ~23 px (#26); dashboard scrubbers out of sync, "Proj. End Pace" always red, brake-overlap % dominated by pit/garage samples (#31–#33). |
+| 14 | Review (Oct 2026) | A full pre-commit review found further issues, logged as roadmap #18–#40. All are fixed except #22, which moved to the LSTM rework; a few dashboard presentation items from #37 moved to the UI redesign. |
 
 ---
 
@@ -649,12 +842,13 @@ is decided in [ROADMAP.md](ROADMAP.md).
 
 | Suite | Files | Tests | Notes |
 |---|---|---|---|
-| Unit | 25 | 178 | Feature engineering (exact values), Isolation Forest I/O, frame selection, CV geometry/classification/turn windows, racing-line grid/search/I/O (incl. cost-aware detours), LSTM data/filtering/training/model/I/O (incl. a learnability check), telemetry cleaning, dashboard (AI tab, dropdowns), project guards (script entry points, FastF1 cache, requirements, logging). All pass. Rewritten in Oct 2026 by the test-suite audit (see `docs/TEST_AUDIT.md`). |
-| Integration | 8 | 52 | Full Isolation Forest pipeline (schema, outputs, correctness, edge cases, skip/force), racing-line pipeline, FastF1 turn windows vs the hand-annotated Bahrain 2024 lap, LSTM train → predict on synthetic data. Run only when `APEXHUNTER_RUN_SLOW=1`. 6 files pass; 2 have pre-existing failures (§8 #10). |
+| Unit | 23 | 127 | Frame selection, CV geometry/classification/turn windows, racing-line grid/search/I/O (incl. cost-aware detours and the time estimate), LSTM data/lap filtering/prediction windows/training/model/I/O (incl. a learnability check), telemetry cleaning, dashboard (AI tab, dropdowns, linked scrubbers, brake-overlap card, CV badge time mapping), project guards (script entry points, FastF1 cache, requirements, logging, UTF-8 file handling). All pass. Isolation Forest tests are being rewritten with the rework. Audit: `docs/TEST_AUDIT.md`. |
+| Integration | 5 | 18 | Real data, no mocks: racing line on 2023 Bahrain qualifying (fastest lap, scale, time estimate, A\* = Dijkstra), LSTM train → predict on real 2024 races 1–4 with real FastF1 laps, FastF1 turn windows vs the hand-annotated Bahrain 2024 lap, Isolation Forest pipeline edge cases and skip/force. Run with `--all`; skipped if `data_lake/` or `cache/` is absent. All pass. |
 
 ```bash
 python backend/scripts/tests/run_tests.py          # unit tests
 python backend/scripts/tests/run_tests.py --all    # unit + integration
+python backend/scripts/tests/run_tests.py --file <test file>   # one unit or integration file
 ```
 
 ---

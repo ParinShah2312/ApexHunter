@@ -64,19 +64,27 @@ def build_pipeline_dag() -> go.Figure:
 # ──  ──────────────────────────────────────────────────────────────────────────
 #  2. HDFS file-size treemap
 # ──  ──────────────────────────────────────────────────────────────────────────
+# Break the speed trace where consecutive (sampled) points are further apart than this
+SPEED_TRACE_MAX_GAP_S = 10.0
+
+_HDFS_DIR_COLORS = {"season_data": _ORANGE, "clean_data": _GREEN, "clean_data_spark": _ACCENT,
+                    "mistake_data": _RED}
+
+
 def build_hdfs_treemap(hdfs_stats: dict) -> go.Figure:
     dirs = hdfs_stats.get("directories", {})
-    labels, parents, values, colors = [], [], [], []
-    labels.append("HDFS"); parents.append(""); values.append(0); colors.append("#1e293b")
-    palette = {"season_data": _ORANGE, "clean_data": _GREEN, "mistake_data": _RED}
+    # ids must be unique: the same file name (e.g. 2023_1_Q.parquet) exists in several folders
+    ids, labels, parents, values, colors = [], [], [], [], []
+    ids.append("HDFS"); labels.append("HDFS"); parents.append(""); values.append(0); colors.append("#1e293b")
     for dname, info in dirs.items():
         sz = info.get("total_size_mb", 0)
-        labels.append(dname); parents.append("HDFS"); values.append(sz)
-        colors.append(palette.get(dname, _ACCENT))
+        ids.append(dname); labels.append(dname); parents.append("HDFS"); values.append(sz)
+        colors.append(_HDFS_DIR_COLORS.get(dname, _ACCENT))
         for f in info.get("files", []):
-            labels.append(f); parents.append(dname); values.append(sz / max(len(info.get("files",[])),1))
-            colors.append(palette.get(dname, _ACCENT))
-    fig = go.Figure(go.Treemap(labels=labels, parents=parents, values=values,
+            ids.append(f"{dname}/{f}"); labels.append(f); parents.append(dname)
+            values.append(sz / max(len(info.get("files",[])),1))
+            colors.append(_HDFS_DIR_COLORS.get(dname, _ACCENT))
+    fig = go.Figure(go.Treemap(ids=ids, labels=labels, parents=parents, values=values,
         marker=dict(colors=colors, line=dict(color=_DARK_BG, width=1)),
         textinfo="label", textfont=dict(size=10)))
     fig.update_layout(paper_bgcolor=_PAPER, height=350, margin=dict(t=10,b=10,l=10,r=10))
@@ -93,7 +101,7 @@ def build_hdfs_bar(hdfs_stats: dict) -> go.Figure:
     counts = [dirs[n].get("file_count", 0) for n in names]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=names, y=sizes, name="Size (MB)",
-        marker_color=[_ORANGE, _GREEN, _RED][:len(names)], text=[f"{s:.0f}" for s in sizes],
+        marker_color=[_HDFS_DIR_COLORS.get(n, _ACCENT) for n in names], text=[f"{s:.0f}" for s in sizes],
         textposition="auto",
         hovertemplate="%{x}<br>Size: %{y:.1f} MB<extra></extra>"), secondary_y=False)
     fig.add_trace(go.Scatter(x=names, y=counts, name="File Count", mode="lines+markers",
@@ -255,24 +263,33 @@ def build_speed_rpm_scatter(sample_df: pd.DataFrame) -> go.Figure:
 
 
 def build_speed_over_distance(sample_df: pd.DataFrame) -> go.Figure:
-    """Speed trace over session time for the selected driver — like F1 TV overlay."""
-    if not {"Speed"}.issubset(sample_df.columns):
+    """Speed over session time for up to three drivers.
+
+    The EDA sample is a random (shuffled) subset, so each driver's rows are sorted by SessionTime
+    before drawing; plotting them in sample order made the "trace" random noise. The line is broken
+    where consecutive samples are more than SPEED_TRACE_MAX_GAP_S apart (garage, gaps between
+    runs), so it never draws straight lines across time the car was not on track.
+    """
+    if not {"Speed", "SessionTime", "Driver"}.issubset(sample_df.columns):
         return go.Figure()
-    # Use first driver in data
     drivers = sample_df["Driver"].unique()[:3]
     fig = go.Figure()
     pal = [_ACCENT, _PURPLE, _GREEN]
     for i, d in enumerate(drivers):
-        dd = sample_df[sample_df["Driver"] == d].reset_index(drop=True)
-        if len(dd) > 3000:
-            dd = dd.iloc[::len(dd)//3000]
-        fig.add_trace(go.Scatter(x=list(range(len(dd))), y=dd["Speed"],
-            mode="lines", line=dict(color=pal[i % len(pal)], width=1.5),
+        dd = sample_df[sample_df["Driver"] == d].sort_values("SessionTime")
+        t_min = pd.to_timedelta(dd["SessionTime"]).dt.total_seconds().to_numpy() / 60.0
+        speed = dd["Speed"].to_numpy(dtype=float)
+        # Insert a gap (None) wherever samples are far apart in time
+        gap_after = np.where(np.diff(t_min) * 60.0 > SPEED_TRACE_MAX_GAP_S)[0]
+        x = np.insert(t_min, gap_after + 1, np.nan)
+        y = np.insert(speed, gap_after + 1, np.nan)
+        fig.add_trace(go.Scatter(x=x, y=y,
+            mode="lines", line=dict(color=pal[i % len(pal)], width=1.5), connectgaps=False,
             name=f"Driver {d}", opacity=0.8,
-            hovertemplate=f"Driver {d}<br>Sample: %{{x}}<br>Speed: %{{y:.1f}} km/h<extra></extra>"))
+            hovertemplate=f"Driver {d}<br>%{{x:.1f}} min<br>Speed: %{{y:.1f}} km/h<extra></extra>"))
     fig.update_layout(paper_bgcolor=_PAPER, plot_bgcolor=_DARK_BG, height=300,
         margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
-        xaxis=dict(title="Sample Index", gridcolor=_GRID),
+        xaxis=dict(title="Session time (min)", gridcolor=_GRID),
         yaxis=dict(title="Speed (km/h)", gridcolor=_GRID),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10, color="#6b7890")))
     return fig
@@ -316,11 +333,15 @@ def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
         return go.Figure()
     s = stints[0]  # first stint
     laps, x_title = stint_lap_axis(s)
+    # Laps without a full 5-lap history have no prediction (None); a filled band can't span them
+    band = [(x, u, lo) for x, u, lo in zip(laps, s["confidence_upper"], s["confidence_lower"])
+            if u is not None and lo is not None]
+    band_x = [b[0] for b in band]
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=laps+laps[::-1],
-        y=s["confidence_upper"]+s["confidence_lower"][::-1],
+    fig.add_trace(go.Scatter(x=band_x + band_x[::-1],
+        y=[b[1] for b in band] + [b[2] for b in band][::-1],
         fill="toself", fillcolor="rgba(168,85,247,0.15)",
-        line=dict(color="rgba(0,0,0,0)"), name="95% CI", hoverinfo="skip"))
+        line=dict(color="rgba(0,0,0,0)"), name="±1σ (MC dropout)", hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=laps, y=s["predicted_laps"], mode="lines",
         line=dict(color=_PURPLE, width=2), name="LSTM Predicted",
         hovertemplate="Lap %{x}<br>LSTM: %{y:.2f}s<extra></extra>"))

@@ -24,7 +24,7 @@ from tqdm import tqdm
 # Make backend/scripts importable so this file runs both by path and as `python -m <pkg>.<module>`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cv.extract_turns import build_turn_windows, save_turn_windows, turn_context_at
+from cv.extract_turns import build_turn_windows_with_lap, save_turn_windows, turn_context_at
 from cv.inference_geometry import classify_apex_status, compute_wheel_positions
 from cv.inference_hud import HUDStateTracker, draw_hud
 from cv.inference_io import create_csv_writer, create_video_writer, finalize_video, open_video, write_csv_row
@@ -65,15 +65,32 @@ def process_video(
     vid_out = OUTPUT_DIR / f"{stem}_HUD.mp4"
     csv_out = OUTPUT_CSV_DIR / f"{stem}_metrics.csv"
     turns_out = OUTPUT_CSV_DIR / f"{stem}_turns.json"
-    if vid_out.exists() and csv_out.exists() and not force:
+    outputs = (vid_out, csv_out, turns_out)
+    if all(o.exists() for o in outputs) and not force:
         logger.info("Already processed. Use --force to re-run."); return
-    turn_windows = build_turn_windows(video_offset_s, input_video_path, year, round_num, driver)
-    save_turn_windows(turn_windows, turns_out, video_offset_s)
+    turn_windows, lap_info = build_turn_windows_with_lap(video_offset_s, input_video_path, year, round_num, driver)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = YOLO(MODEL_PATH).to(device)
     cap, w, h, fps, total = open_video(input_video_path)
     out = create_video_writer(vid_out, fps, w, h)
     csv_fh, csv_w = create_csv_writer(csv_out)
+    try:
+        save_turn_windows(turn_windows, turns_out, video_offset_s, lap_info)
+        _process_frames(cap, out, csv_w, model, turn_windows, w, h, fps, total)
+    except BaseException:
+        # A crashed or interrupted run must not leave files that later count as "already processed"
+        cap.release(); out.release(); csv_fh.close()
+        for o in outputs:
+            o.unlink(missing_ok=True)
+        logger.error("Inference stopped; partial outputs removed.")
+        raise
+    cap.release(); out.release(); csv_fh.close()
+    finalize_video(vid_out)
+    logger.info(f"Done — Video: {vid_out.resolve()}, CSV: {csv_out.resolve()}")
+
+
+def _process_frames(cap, out, csv_w, model, turn_windows, w: int, h: int, fps: float, total: int) -> None:
+    """Run YOLO + geometry on every frame, writing the HUD video and the metrics CSV."""
     lw, rw = compute_wheel_positions(w, h)
     cx = w // 2
     tracker = HUDStateTracker(alpha=0.15)
@@ -86,7 +103,9 @@ def process_video(
         timestamp_sec = float(idx) / float(fps) if fps > 0 else 0.0
         expected_turn, speed_cat = turn_context_at(timestamp_sec, turn_windows)
 
-        res = model.predict(frame, conf=0.25, verbose=False)[0]
+        # retina_masks: full-resolution masks with the letterbox padding removed. Without it the
+        # 384x640 network mask was stretched over the frame, shifting edges by up to ~29 px.
+        res = model.predict(frame, conf=0.25, verbose=False, retina_masks=True)[0]
         hud, dist, cp, dw, curb, turn = process_masks(res, frame, lw, rw, cx, expected_turn, speed_cat)
 
         # Phase 1: Apply Temporal Smoothing to visual and data elements
@@ -98,9 +117,6 @@ def process_video(
         ds = "N/A" if not curb or dist == float('inf') else f"{int(dist * PIXELS_TO_CM)}cm"
         write_csv_row(csv_w, idx, fps, ds, status, curb)
         out.write(draw_hud(frame, hud, lw, rw, cp, dw, curb, status, color, ds, turn, ALPHA, idx))
-    cap.release(); out.release(); csv_fh.close()
-    finalize_video(vid_out)
-    logger.info(f"Done — Video: {vid_out.resolve()}, CSV: {csv_out.resolve()}")
 
 
 def main() -> None:

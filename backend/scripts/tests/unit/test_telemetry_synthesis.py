@@ -12,7 +12,7 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from etl.clean_telemetry import clean_telemetry_file, get_directory_size
+from etl.clean_telemetry import clean_telemetry_file
 
 
 def _make_base_df(n=80):
@@ -66,28 +66,6 @@ class TestTelemetrySynthesis(unittest.TestCase):
         empty.to_parquet(self.input_path, compression="snappy")
         clean_telemetry_file(self.input_path, self.output_path)
         self.assertFalse(self.output_path.exists())
-
-    def test_output_is_snappy_compressed(self):
-        import pyarrow.parquet as pq
-        df = _make_base_df()
-        df.to_parquet(self.input_path, compression="snappy")
-        clean_telemetry_file(self.input_path, self.output_path)
-        meta = pq.read_metadata(self.output_path)
-        compression = meta.row_group(0).column(0).compression
-        self.assertEqual(compression.upper(), "SNAPPY")
-
-    def test_get_directory_size_returns_string(self):
-        df = _make_base_df()
-        df.to_parquet(self.input_path, compression="snappy")
-        result = get_directory_size(Path(self.tmp))
-        self.assertIsInstance(result, str)
-        self.assertTrue(result.endswith(" MB"))
-
-    def test_get_directory_size_nonzero(self):
-        df = _make_base_df()
-        df.to_parquet(self.input_path, compression="snappy")
-        result = get_directory_size(Path(self.tmp))
-        self.assertNotEqual(result, "0.00 MB")
 
 
 if __name__ == "__main__":

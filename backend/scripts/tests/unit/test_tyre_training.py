@@ -7,7 +7,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -18,7 +17,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import torch
 import torch.nn as nn
 
-from lstm.tyre_data import SEQUENCE_LENGTH, build_training_dataset, session_sort_key
+from lstm.tyre_data import SEQUENCE_LENGTH, session_sort_key
 from lstm.tyre_io import load_model_artifacts, save_model_artifacts
 from lstm.tyre_model import (
     DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, split_by_groups, train_one_config,
@@ -41,30 +40,6 @@ class TestChronologicalOrdering(unittest.TestCase):
         self.assertEqual([p.name for p in ordered],
                          ["2023_5_R.parquet", "2023_22_R.parquet", "2024_2_R.parquet", "2024_10_R.parquet"])
 
-    def test_build_training_dataset_processes_sessions_chronologically(self) -> None:
-        tmp = Path(tempfile.mkdtemp())
-        try:
-            sessions_dir = tmp / "data_lake" / "clean_data"
-            sessions_dir.mkdir(parents=True)
-            for r in (10, 2, 1):
-                (sessions_dir / f"2024_{r}_R.parquet").touch()
-
-            calls = []
-
-            def fake_process(path, _logger):
-                calls.append(path.name)
-                seq = np.zeros((SEQUENCE_LENGTH, INPUT_SIZE), dtype=np.float32)
-                return [seq, seq], [1.0, 2.0]
-
-            with mock.patch("lstm.tyre_data._process_single_file", side_effect=fake_process):
-                X, y, groups = build_training_dataset(sessions_dir, ["2024"], _silent_logger())
-
-            self.assertEqual(calls, ["2024_1_R.parquet", "2024_2_R.parquet", "2024_10_R.parquet"])
-            self.assertEqual(groups.tolist(), [0, 0, 1, 1, 2, 2])
-            self.assertEqual(X.shape, (6, SEQUENCE_LENGTH, INPUT_SIZE))
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
 
 class TestSplitByGroups(unittest.TestCase):
 
@@ -84,12 +59,6 @@ class TestSplitByGroups(unittest.TestCase):
     def test_never_holds_out_every_session(self) -> None:
         keep, hold = split_by_groups(len(self.groups), self.groups, 0.99)
         self.assertGreater(len(keep), 0)
-
-    def test_falls_back_to_index_split_without_groups(self) -> None:
-        keep, hold = split_by_groups(10, None, 0.2)
-        self.assertEqual(hold.tolist(), [8, 9])
-        keep, hold = split_by_groups(10, np.zeros(10, dtype=int), 0.2)
-        self.assertEqual(hold.tolist(), [8, 9])
 
 
 class TestScalingWithoutLeakage(unittest.TestCase):

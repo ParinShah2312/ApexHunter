@@ -63,9 +63,16 @@ def _drop_all_null_core_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _forward_fill_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Step 3: Forward fill small gaps in numeric columns."""
+    """Step 3: Forward fill small gaps in numeric columns, within each driver.
+
+    A file holds one driver after another, so a file-wide fill would carry the previous
+    driver's last values into the next driver's leading gap.
+    """
     numeric_cols = df.select_dtypes(include=[np.number]).columns
-    df[numeric_cols] = df[numeric_cols].ffill()
+    if "Driver" in df.columns:
+        df[numeric_cols] = df.groupby("Driver", sort=False)[numeric_cols].ffill()
+    else:
+        df[numeric_cols] = df[numeric_cols].ffill()
     return df
 
 
@@ -131,7 +138,11 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
         df = _downcast_to_float32(df)
 
         # Save Cleaned Data to Parquet (Better for big data than CSV)
-        df.to_parquet(output_file, compression="snappy")
+        # Write to a temporary file and rename when complete: a crash mid-write used to leave a
+        # partial file that the skip-if-exists check then treated as done
+        tmp_file = output_file.with_name(output_file.name + ".tmp")
+        df.to_parquet(tmp_file, compression="snappy")
+        tmp_file.replace(output_file)
 
         logger.info(f"Cleaned {input_file.name}: Dropped {dropped_rows} rows. Saved to clean_data/.")
 

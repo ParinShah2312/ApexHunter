@@ -1,9 +1,77 @@
 # Isolation Forest Rework — Design (roadmap §B)
 
 **Course:** Data Science & Machine Learning · **Status:** agreed, ready to implement
+(starts after the test audit, ROADMAP §0)
 **Also closes:** bugs #8 and #9 (remaining part), test-audit items A3, A4, A20.
 
 ---
+
+## 0. Before you start (handoff notes)
+
+Read this section, then ROADMAP §3 ("Rules while working"), before writing any code.
+
+### 0.1 What the code does today (to be replaced)
+- `detect_mistakes.py` orchestrates `isolation_forest/mistakes_features.py` (7 absolute features
+  per sample: `speed_normalized`, `throttle_intensity`, `brake_intensity`, `brake_throttle_overlap`,
+  `speed_delta`, `gear_change`, `rpm_normalized`), `mistakes_model.py` (5-fold "grid search" over
+  contamination 0.005–0.05 with a criterion that always picks 0.005; 200 trees) and
+  `mistakes_io.py` (load/validate, reference driver = fastest by mean speed, outputs).
+- Training data = target driver + one reference driver, **all samples** (garage, pit and
+  safety-car laps included). Every problem listed in §1 below is real and measured.
+
+### 0.2 Data facts that have caused bugs before
+- `Brake` is **binary** (0/1), not a percentage (bug #1). Throttle is 0–100.
+- X/Y are in **1/10 m** (FastF1 docs; checked on 4 circuits, bug #18). Use 0.1 m per unit.
+- Samples are **irregularly spaced** (median 0.13 s, range 0.014–0.76 s), so a per-sample
+  difference (e.g. `speed_delta`) is not a rate. Use time-normalised differences.
+- Raw telemetry has **no NaNs**; garage time is recorded as 0 km/h samples, often with brake and
+  throttle on together (up to 94 % of a qualifying session's overlap samples, bug #33).
+- Each session parquet holds all drivers; `Driver` is the car number as a string ("1", "44").
+- `SessionTime` is the real time axis; the `Time` column is synthesised from the row index and
+  meaningless.
+- FastF1's `pick_fastest()` can return `None` (driver without a timed lap, bug #19).
+
+### 0.3 Reuse, don't re-implement
+| Need | Use |
+|---|---|
+| Representative laps (no lap 1, pit in/out, SC/VSC/red flag, deleted, inaccurate) | `lstm.tyre_data.representative_lap_mask(laps)` |
+| FastF1 session/laps | `utils.enable_fastf1_cache()` then `fastf1.get_session(year, round, "Q"/"R")`; `laps.pick_drivers(driver)` |
+| Nearest-neighbour projection onto a lap | `scipy.spatial.cKDTree` (as in `racing_line_io.estimate_path_time`) |
+| Slicing telemetry to one lap | `SessionTime` between `LapStartTime` and `Time` (as in `racing_line_io.fetch_fastest_lap_bounds`) |
+| Logging | `utils.setup_logger` (handles Windows console encoding) |
+
+### 0.4 Who reads the outputs (keep these working, or update them in the same change)
+- File names: `data_lake/mistake_data/{session_stem}_{driver}_mistakes.parquet` and
+  `…_mistakes_meta.json` (the sidebar derives these paths and shows a status dot).
+- Parquet columns used by the dashboard: `X`, `Y`, `Speed`, `SessionTime`, `is_mistake`,
+  `anomaly_score` (AI tab map and track-map "Mistakes" mode), `brake_intensity` (AI tab "Under
+  Braking" card — replace this card if the feature disappears). The dashboard assigns `LapNumber`
+  itself from FastF1 lap times.
+- Meta keys used by the dashboard: `best_contamination`, `reference_driver` (will become a list of
+  5 drivers; update `ai_analysis.py`). Used by `bigdata/mongo_manager.py`: `session_file`,
+  `driver`, `best_contamination`, plus parquet `anomaly_score`, `is_mistake`, `Speed`.
+- New outputs (`*_mistakes_events.json`, evaluation metrics in the meta file) are additive.
+
+### 0.5 Tests for the rework
+- Replace the mock-only model tests with a few tests that run the real code (audit item A3): e.g.
+  the injected-mistake evaluation finds planted mistakes on a small real or realistic lap; the
+  deviation features are zero when the driver equals the reference profile; events merge
+  consecutive flags and give the expected reason.
+- The old Isolation Forest tests were deleted in test audit round 2 (they pinned the old method).
+  Write their replacements here: a pipeline output/schema test for the new outputs (old A20) and a
+  correctness test that planted mistakes are found (old `test_pipeline_correctness`). The kept
+  `integration/test_pipeline_edge_cases.py` and `test_pipeline_skip_force.py` must keep passing.
+- Follow the test rules in ROADMAP §3: real code, one test per behaviour that matters, no padding,
+  **no mocks** (use small real inputs, or real sessions from `data_lake/` in integration tests,
+  as `integration/test_racing_line_pipeline.py` and `test_tyre_pipeline.py` do).
+- The main proof of each phase is a **real-data run** (2023 R1 race, driver 1, plus at least one
+  other session), with the numbers written into PROJECT_DOCUMENTATION §5.2.
+
+### 0.6 How to work through it
+- One phase at a time (§4), check in with the user after each phase, update the docs at the end
+  of each phase (PROJECT_DOCUMENTATION §5.2 and §8, ROADMAP §0/§2B, README if commands change).
+- Log any bug found on the way in ROADMAP §2A (next number #41).
+- Keep the dashboard change minimal (decision 4 in §5); the real UI comes in ROADMAP §E.
 
 ## 1. What is wrong today
 
@@ -125,7 +193,7 @@ the project focused.
 | `detect_mistakes.py` | Orchestrates the new steps; adds `--compare` to run the Z-score vs Isolation Forest comparison (the autoencoder joins in roadmap §D). |
 | Outputs | `*_mistakes.parquet` (+ `track_pos`, lap, new features), `*_mistakes_events.json` *(new)*, `*_mistakes_meta.json` (+ evaluation metrics, reference drivers). Keys used by MongoDB and the Big Data tab are kept. |
 | `frontend/components/ai_analysis.py` | Only enough to verify the rework: event list with reasons and map markers per event. The full redesign is done later with the rest of the UI (roadmap §E). |
-| Tests | Mock-only tests replaced by real-model tests (A3); log test fixed (A4); schema test rewritten (A20); `test_pipeline_correctness` should pass. |
+| Tests | Old tests already deleted (test audit round 2). New: real-model tests (old A3), output/schema test (old A20), planted-mistake correctness test; kept edge-case and skip/force tests must pass. |
 | Docs | PROJECT_DOCUMENTATION §5.2 rewritten with the new method, evaluation and comparison results. |
 
 ## 4. Plan (phases)
@@ -136,7 +204,7 @@ the project focused.
 | 2 | Injection + evaluation harness; contamination/hyperparameter search | Selection no longer always picks the smallest contamination; PR-AUC reported |
 | 3 | Events + reasons; outputs; minimal dashboard update | Bahrain 2023 race shows a short, readable event list |
 | 4 | Z-score baseline in the same evaluation (autoencoder added in roadmap §D) | Comparison table in the docs |
-| 5 | Tests, regenerate outputs, docs | Full test suite green (incl. the two currently failing integration files) |
+| 5 | Tests, regenerate outputs, docs | Full test suite green, including the new Isolation Forest tests |
 
 Each phase ends with a check-in before the next.
 

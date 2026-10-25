@@ -19,7 +19,9 @@ SPEED_WEIGHT_FACTOR: float = 1.0
 BRAKE_WEIGHT_FACTOR: float = 2.0
 MIN_POINTS_PER_CELL: int = 1
 DIAGONAL_COST_FACTOR: float = 1.4142135623730951
-APPROX_LAP_SECONDS: float = 90.0
+# FastF1 telemetry X/Y are in 1/10 m (fastf1.core.Telemetry docs); checked by integrating
+# speed over fastest laps at Bahrain, Monaco, Silverstone and Spa: 0.0996–0.1006 m/unit.
+FASTF1_POSITION_SCALE: float = 0.1
 MAX_SPEED_FOR_WEIGHT: float = 380.0
 MAX_BRAKE_FOR_WEIGHT: float = 1.0       # FastF1 Brake is binary, so a cell's mean brake is a 0–1 fraction
 
@@ -192,128 +194,11 @@ def get_nearest_node(
     return nearest_key
 
 
-def find_start_end_nodes(
-    grid: Dict[Tuple[int, int], GridNode],
-    df: pd.DataFrame,
-    resolution: float,
-    adjacency: Dict[Tuple[int, int], List[Tuple[Tuple[int, int], float]]]
-) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    """Find start and end grid nodes for pathfinding within the largest connected component.
-
-    Args:
-        grid: The node dictionary.
-        df: The telemetry DataFrame.
-        resolution: The resolution used to build the grid.
-        adjacency: The adjacency dictionary.
-
-    Returns:
-        A tuple containing the start and end node (i, j) coordinates.
-    """
-    # 1. Find largest connected component
-    visited = set()
-    largest_comp = set()
-    for node in grid:
-        if node not in visited:
-            comp = set()
-            q = [node]
-            while q:
-                curr = q.pop(0)
-                if curr not in comp:
-                    comp.add(curr)
-                    for nxt, _ in adjacency.get(curr, []):
-                        if nxt not in comp:
-                            q.append(nxt)
-            visited.update(comp)
-            if len(comp) > len(largest_comp):
-                largest_comp = comp
-
-    # Filter out slow/stopped points to ensure we start on the track
-    df_filtered = df[df["Speed"] > 10].sort_values("SessionTime")
-    if df_filtered.empty:
-        df_filtered = df.sort_values("SessionTime")
-
-    # Same grid origin as build_grid (all samples), otherwise rows map to shifted cells
-    x_min = df["X"].min()
-    y_min = df["Y"].min()
-
-    # Keep only rows that map to the largest component
-    valid_rows = []
-    for row in df_filtered.itertuples():
-        i = int((row.X - x_min) / resolution)
-        j = int((row.Y - y_min) / resolution)
-        if (i, j) in largest_comp:
-            valid_rows.append(row)
-
-    if not valid_rows:
-        logger.warning("No telemetry points fall into the largest connected component!")
-        valid_rows = list(df_filtered.itertuples()) # Fallback
-
-    start_row = valid_rows[0]
-    start_i = int((start_row.X - x_min) / resolution)
-    start_j = int((start_row.Y - y_min) / resolution)
-    start_key = (start_i, start_j) if (start_i, start_j) in grid else get_nearest_node(grid, start_i, start_j)
-
-    # Always use the furthest node in the connected component as the end node
-    # to guarantee we compute a long, track-spanning path rather than a tiny hop.
-    furthest_key = start_key
-    max_dist = -1
-    for key in largest_comp:
-        dist = abs(key[0] - start_key[0]) + abs(key[1] - start_key[1])
-        if dist > max_dist:
-            max_dist = dist
-            furthest_key = key
-    end_key = furthest_key
-
-    logger.info(f"Start node: {start_key}, End node (furthest): {end_key}")
-    return start_key, end_key
-
-
-def _compute_arc_length(df: pd.DataFrame) -> float:
-    """Compute total arc length in coordinate units."""
-    dx = df["X"].diff().fillna(0.0)
-    dy = df["Y"].diff().fillna(0.0)
-    return float(np.sqrt(dx**2 + dy**2).sum())
-
-
-def _estimate_lap_count(df: pd.DataFrame) -> int:
-    """Estimate number of laps based on session duration."""
-    session_duration_s = (df["SessionTime"].max() - df["SessionTime"].min()).total_seconds()
-    return max(1, round(session_duration_s / APPROX_LAP_SECONDS))
-
-
-def compute_coordinate_scale(
-    df: pd.DataFrame,
-    circuit_length_km: float
-) -> float:
-    """Derive a scale factor converting coordinate units to meters.
-
-    Computed by comparing the total arc length of the telemetry path (in coordinate
-    units) to the known circuit length.
-
-    Args:
-        df: The telemetry DataFrame.
-        circuit_length_km: The length of the circuit in kilometers.
-
-    Returns:
-        The scale factor in meters per coordinate unit.
-    """
-    df_sorted = df.sort_values("SessionTime")
-
-    arc_length_units = _compute_arc_length(df_sorted)
-    estimated_laps = _estimate_lap_count(df_sorted)
-
-    arc_per_lap_units = arc_length_units / estimated_laps
-
-    circuit_length_m = circuit_length_km * 1000.0
-    scale = circuit_length_m / arc_per_lap_units if arc_per_lap_units > 0 else 1.0
-
-    scale = max(0.001, min(scale, 1.0))
-    logger.info(
-        f"Coordinate scale: {scale:.6f} m/unit (circuit={circuit_length_km} km, "
-        f"arc_per_lap={arc_per_lap_units:.1f} units)"
-    )
-
-    return scale
+def lap_length_km(df_lap: pd.DataFrame) -> float:
+    """Length of one lap of telemetry (driven path, X/Y in FastF1 units), in km."""
+    dx = df_lap["X"].diff().fillna(0.0)
+    dy = df_lap["Y"].diff().fillna(0.0)
+    return float(np.sqrt(dx**2 + dy**2).sum()) * FASTF1_POSITION_SCALE / 1000.0
 
 
 def get_node_for_row(row, x_min: float, y_min: float, resolution: float, grid: dict) -> tuple:

@@ -312,8 +312,9 @@ def _render_lstm_column(tyre_data: Optional[dict]) -> None:
         if valid_actuals and valid_preds:
             proj_pace = valid_preds[-1]
             diff = proj_pace - valid_actuals[-1]
-            color = "normal" if diff <= 0 else "inverse"
-            st.metric("Proj. End Pace", f"{proj_pace:.2f}s", f"{diff:+.2f}s", delta_color=color)
+            # Lap time: lower is better, so a negative delta (faster) is green and positive red.
+            # "inverse" is exactly that; switching modes by sign made both cases red.
+            st.metric("Proj. End Pace", f"{proj_pace:.2f}s", f"{diff:+.2f}s", delta_color="inverse")
         else:
             st.metric("Proj. End Pace", "—")
 

@@ -1,4 +1,9 @@
-"""Integration tests: end-to-end optimal racing line pipeline."""
+"""Integration test: the real racing-line pipeline on real data (2023 Bahrain qualifying, car #1).
+
+No mocks: reads data_lake/clean_data/2023_1_Q.parquet and the FastF1 cache (cache/). Expected values
+are the real ones documented in PROJECT_DOCUMENTATION §5.3 (Verstappen's pole lap: lap 14, 89.708 s).
+Skipped when the local data is not present.
+"""
 
 import argparse
 import json
@@ -8,144 +13,56 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-RUN_SLOW = os.environ.get("APEXHUNTER_RUN_SLOW", "0") == "1"
-slow_test = unittest.skipUnless(RUN_SLOW, "Skipped: set APEXHUNTER_RUN_SLOW=1 to run")
-
 from optimal_line import run_pipeline
+from utils import DATA_LAKE_DIR
 
-_FIXTURE_CACHE = {}
-
-
-def run_pipeline_once():
-    """Run the racing line pipeline once and cache the result."""
-    if "data" in _FIXTURE_CACHE:
-        return _FIXTURE_CACHE["data"]
-
-    temp_dir = tempfile.TemporaryDirectory()
-    temp_path = Path(temp_dir.name)
-
-    n_rows = 1000
-    rng = np.random.RandomState(42)
-    t = np.linspace(0, 6 * np.pi, n_rows)  # 3 laps
-    x = np.cos(t) * 3000.0
-    y = np.sin(t) * 1500.0
-
-    df = pd.DataFrame({
-        "Driver": ["44"] * n_rows,
-        "X": x.astype(np.float32),
-        "Y": y.astype(np.float32),
-        "Speed": rng.uniform(100, 300, n_rows).astype(np.float32),
-        "Brake": rng.randint(0, 2, n_rows).astype(np.float32),
-        "SessionTime": pd.to_timedelta(np.linspace(0, 270, n_rows), unit="s")
-    })
-    session_file = temp_path / "synthetic_session.parquet"
-    df.to_parquet(session_file)
-
-    output_dir = temp_path / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    args = argparse.Namespace(
-        session=str(session_file),
-        driver="44",
-        resolution=100.0,
-        circuit_length=5.0,
-        n_corners=16,
-        output_dir=str(output_dir),
-        force=False
-    )
-
-    run_pipeline(args)
-
-    expected_output_path = output_dir / "synthetic_session_44_racing_line.json"
-
-    with open(expected_output_path, "r") as f:
-        data = json.load(f)
-
-    _FIXTURE_CACHE["data"] = {
-        "temp_dir": temp_dir,
-        "temp_path": temp_path,
-        "session_file": session_file,
-        "output_dir": output_dir,
-        "output_path": expected_output_path,
-        "json_data": data,
-        "args": args
-    }
-
-    return _FIXTURE_CACHE["data"]
+RUN_SLOW = os.environ.get("APEXHUNTER_RUN_SLOW", "0") == "1"
+SESSION = DATA_LAKE_DIR / "clean_data" / "2023_1_Q.parquet"
 
 
-@slow_test
-class TestRacingLinePipeline(unittest.TestCase):
+@unittest.skipUnless(RUN_SLOW, "Skipped: set APEXHUNTER_RUN_SLOW=1 to run")
+@unittest.skipUnless(SESSION.exists(), f"Needs local data: {SESSION}")
+class TestRacingLineOnRealData(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
-        cls.fixture = run_pipeline_once()
-        cls.output_path = cls.fixture["output_path"]
-        cls.data = cls.fixture["json_data"]
-        cls.args = cls.fixture["args"]
+        cls.tmp = tempfile.TemporaryDirectory()
+        args = argparse.Namespace(session=str(SESSION), driver="1", resolution=50.0, n_corners=16,
+                                  output_dir=cls.tmp.name, force=True)
+        run_pipeline(args)
+        with open(Path(cls.tmp.name) / "2023_1_Q_1_racing_line.json", encoding="utf-8") as f:
+            cls.data = json.load(f)
 
     @classmethod
     def tearDownClass(cls):
-        if "data" in _FIXTURE_CACHE:
-            _FIXTURE_CACHE["data"]["temp_dir"].cleanup()
-            _FIXTURE_CACHE.clear()
+        cls.tmp.cleanup()
 
-    def test_output_file_created(self):
-        self.assertTrue(self.output_path.exists())
+    def test_uses_the_fastf1_fastest_lap_only(self):
+        """#19: the path must come from the fastest lap, never the whole session (3,071 points)."""
+        lap = self.data["fastest_lap"]
+        self.assertEqual((lap["lap_number"], lap["lap_time_s"]), (14, 89.708))
+        self.assertEqual(len(self.data["driver_path"]), 66)          # every 10th of 652 lap samples
 
-    def test_output_json_valid(self):
-        self.assertIsInstance(self.data, dict)
-        self.assertIn("algorithms", self.data)
+    def test_scale_and_lap_length(self):
+        """#18: FastF1 X/Y are 1/10 m, so Bahrain's driven lap is ~5.34 km (circuit 5.412 km)."""
+        self.assertEqual(self.data["coordinate_scale"], 0.1)
+        self.assertAlmostEqual(self.data["fastest_lap"]["length_km"], 5.34, delta=0.05)
 
-    def test_all_algorithms_ran(self):
-        self.assertTrue(self.data["algorithms"]["astar"]["found"])
-        self.assertTrue(self.data["algorithms"]["dijkstra"]["found"])
-        self.assertTrue(self.data["algorithms"]["bfs"]["found"])
+    def test_time_estimate_reproduces_the_real_lap(self):
+        """#39: the time model applied to the driver's own lap is within 2 % of the real time."""
+        lap = self.data["fastest_lap"]
+        self.assertAlmostEqual(lap["estimated_time_s"], lap["lap_time_s"], delta=0.02 * lap["lap_time_s"])
 
-    def test_paths_start_at_same_node(self):
-        astar_start = self.data["algorithms"]["astar"]["path"][0]
-        dijkstra_start = self.data["algorithms"]["dijkstra"]["path"][0]
-        self.assertEqual(astar_start, dijkstra_start)
-
-    def test_astar_cost_equals_dijkstra_cost(self):
-        a_cost = self.data["algorithms"]["astar"]["cost"]
-        d_cost = self.data["algorithms"]["dijkstra"]["cost"]
-        self.assertLess(abs(a_cost - d_cost), 0.01)
-
-    def test_bfs_path_never_cheaper_than_astar(self):
-        # A* is optimal for the weighted cost, so BFS (which ignores costs) can only tie or lose.
-        # (Nodes expanded is NOT ordered: on real Bahrain data BFS expanded fewer nodes than A*.)
-        self.assertGreaterEqual(self.data["algorithms"]["bfs"]["cost"],
-                                self.data["algorithms"]["astar"]["cost"] - 1e-6)
-
-    def test_deviation_per_corner_correct_length(self):
-        self.assertEqual(len(self.data["deviation_per_corner"]), self.data["n_corners"])
-
-    def test_driver_path_is_subsampled(self):
-        self.assertLess(len(self.data["driver_path"]), 1000)
-
-    def test_skip_if_exists(self):
-        mtime_before = self.output_path.stat().st_mtime
-        run_pipeline(self.args)
-        mtime_after = self.output_path.stat().st_mtime
-        self.assertEqual(mtime_before, mtime_after)
-
-    def test_force_overwrites(self):
-        mtime_before = self.output_path.stat().st_mtime
-        import time
-        time.sleep(1.1)  # filesystem mtime resolution can be up to 1 s
-
-        args_force = argparse.Namespace(**vars(self.args))
-        args_force.force = True
-        run_pipeline(args_force)
-
-        mtime_after = self.output_path.stat().st_mtime
-        self.assertNotEqual(mtime_before, mtime_after)
+    def test_astar_is_optimal_and_bfs_is_not_cheaper(self):
+        algos = self.data["algorithms"]
+        self.assertTrue(all(a["found"] for a in algos.values()))
+        self.assertAlmostEqual(algos["astar"]["cost"], algos["dijkstra"]["cost"], places=3)
+        self.assertGreaterEqual(algos["bfs"]["cost"], algos["astar"]["cost"])
+        self.assertLess(algos["astar"]["nodes_expanded"], algos["dijkstra"]["nodes_expanded"])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

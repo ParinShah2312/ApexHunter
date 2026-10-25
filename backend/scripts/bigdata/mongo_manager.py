@@ -46,11 +46,16 @@ logger = setup_logger(__name__)
 
 
 # ── Connection Helpers ────────────────────────────────────────────────────────
+# One client per process, as pymongo recommends (it pools connections). Every call used to open a
+# new client that was never closed.
+_client: Optional[MongoClient] = None
+
+
 def get_client() -> MongoClient:
-    """Create a MongoClient, ping the server, and return it.
+    """Return the shared MongoClient, creating and pinging it on first use.
 
     The client uses serverSelectionTimeoutMS=3000 so that callers fail
-    fast when MongoDB is unreachable.
+    fast when MongoDB is unreachable. A client is only kept once a ping succeeds.
 
     Returns:
         A connected MongoClient instance.
@@ -58,9 +63,16 @@ def get_client() -> MongoClient:
     Raises:
         ConnectionFailure: If MongoDB does not respond within the timeout.
     """
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
-    client.admin.command("ping")
-    return client
+    global _client
+    if _client is None:
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+        try:
+            client.admin.command("ping")
+        except Exception:
+            client.close()
+            raise
+        _client = client
+    return _client
 
 
 def check_mongo_available() -> bool:
@@ -70,7 +82,7 @@ def check_mongo_available() -> bool:
         True if a ping succeeds, False otherwise.
     """
     try:
-        get_client()
+        get_client().admin.command("ping")
         return True
     except Exception as e:
         logger.error(f"MongoDB not available: {e}")
@@ -102,7 +114,8 @@ def upload_mistake_outputs(force: bool = False) -> Dict[str, int]:
 
     Each parquet file is paired with a ``*_meta.json`` sidecar.  Documents
     are upserted into the ``mistake_annotations`` collection keyed by
-    ``{session_file, driver}``.
+    ``{session_file, driver}``, where session_file is the file name only (e.g.
+    "2023_1_R.parquet"), so a session run with an absolute and a relative path is one document.
 
     Args:
         force: If True, overwrite existing documents; otherwise skip them.
@@ -127,13 +140,17 @@ def upload_mistake_outputs(force: bool = False) -> Dict[str, int]:
                 continue
 
             try:
-                with open(meta_path, "r") as f:
+                with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
 
-                filter_key = {
-                    "session_file": meta.get("session_file"),
+                session_name = Path(str(meta.get("session_file", ""))).name
+                filter_key = {"session_file": session_name, "driver": meta.get("driver")}
+                # Older uploads keyed the same session by its full path as typed
+                # (e.g. "data_lake/clean_data/2023_1_R.parquet"); remove those duplicates
+                coll.delete_many({
                     "driver": meta.get("driver"),
-                }
+                    "session_file": {"$regex": "[/\\\\]" + re.escape(session_name) + "$"},
+                })
 
                 if not force:
                     existing = coll.find_one(filter_key)
@@ -179,6 +196,7 @@ def upload_mistake_outputs(force: bool = False) -> Dict[str, int]:
                 doc = {
                     **meta,
                     **summary,
+                    "session_file": session_name,
                     "source_parquet": str(p.name),
                     "uploaded_at": datetime.now(IST).isoformat(),
                 }
@@ -482,7 +500,7 @@ def write_status_log(mongo_available: bool, upload_summary: Optional[Dict] = Non
 
     try:
         DATA_LAKE_DIR.mkdir(parents=True, exist_ok=True)
-        with open(MONGO_STATUS_LOG, "w") as f:
+        with open(MONGO_STATUS_LOG, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         logger.info(f"Wrote MongoDB status log to {MONGO_STATUS_LOG}")
     except Exception as e:

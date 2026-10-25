@@ -32,14 +32,14 @@ def open_video(input_path: Path) -> Tuple[cv2.VideoCapture, int, int, int, int]:
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    fps = float(cap.get(cv2.CAP_PROP_FPS))      # e.g. 50.006; int() truncated it
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     return cap, width, height, fps, total_frames
 
 
 def create_video_writer(
-    output_path: Path, fps: int, width: int, height: int
+    output_path: Path, fps: float, width: int, height: int
 ) -> cv2.VideoWriter:
     """Create and return a VideoWriter using mp4v codec.
 
@@ -114,7 +114,7 @@ def create_csv_writer(csv_path: Path) -> Tuple[Any, Any]:
         Tuple of (file_handle, csv_writer). The caller is responsible for
         closing the file handle.
     """
-    file_handle = open(csv_path, mode='w', newline='')
+    file_handle = open(csv_path, mode='w', newline='', encoding="utf-8")
     writer = csv.writer(file_handle)
     writer.writerow(['frame_number', 'timestamp_sec', 'distance_cm', 'status', 'has_curb'])
     return file_handle, writer
@@ -123,7 +123,7 @@ def create_csv_writer(csv_path: Path) -> Tuple[Any, Any]:
 def write_csv_row(
     csv_writer: Any,
     frame_idx: int,
-    fps: int,
+    fps: float,
     distance_str: str,
     status: str,
     has_curb: bool,

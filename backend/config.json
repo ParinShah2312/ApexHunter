@@ -47,11 +47,14 @@
     ]
   },
   "manual_downloads": {
-    "19_unitedstates_nor_pole": "https://youtu.be/sC8pW4HsOs4",
-    "20_mexico_sai_pole": "https://youtu.be/wVFJP4ECnAc",
-    "21_brazil_nor_pole": "https://youtu.be/ZhERj8n4HEQ",
-    "22_lasvegas_rus_pole": "https://youtu.be/7N_GVP_CUqA",
-    "23_qatar_ver_pole": "https://youtu.be/aMEoQSPRRh4",
-    "24_abudhabi_nor_pole": "https://youtu.be/ul4wmQwxrwA"
+    "year": "2024",
+    "videos": {
+      "19_unitedstates_nor_pole": "https://youtu.be/sC8pW4HsOs4",
+      "20_mexico_sai_pole": "https://youtu.be/wVFJP4ECnAc",
+      "21_brazil_nor_pole": "https://youtu.be/ZhERj8n4HEQ",
+      "22_lasvegas_rus_pole": "https://youtu.be/7N_GVP_CUqA",
+      "23_qatar_ver_pole": "https://youtu.be/aMEoQSPRRh4",
+      "24_abudhabi_nor_pole": "https://youtu.be/ul4wmQwxrwA"
+    }
   }
 }

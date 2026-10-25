@@ -3,14 +3,14 @@ pipeline. Isolates all file I/O operations from the grid and search logic."""
 
 import json
 import logging
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree
 
-from racing_line.racing_line_grid import GridNode
 from racing_line.racing_line_search import SearchResult
 from utils import IST, enable_fastf1_cache
 
@@ -66,7 +66,7 @@ def build_output(
     session_path: str,
     driver: str,
     grid_resolution: float,
-    circuit_length_km: float,
+    fastest_lap: dict,
     scale: float,
     astar_result: SearchResult,
     dijkstra_result: SearchResult,
@@ -82,8 +82,9 @@ def build_output(
         session_path: The session file path.
         driver: The driver code string.
         grid_resolution: The grid cell size.
-        circuit_length_km: The circuit length in km.
-        scale: The coordinate scale factor.
+        fastest_lap: The FastF1 lap the line was built from (lap_number, lap_time_s, length_km,
+            estimated_time_s = the time model applied to that lap, a check on its accuracy).
+        scale: Metres per coordinate unit.
         astar_result: Result from A*.
         dijkstra_result: Result from Dijkstra.
         bfs_result: Result from BFS.
@@ -99,7 +100,7 @@ def build_output(
         "session_file": session_path,
         "driver": driver,
         "grid_resolution": grid_resolution,
-        "circuit_length_km": circuit_length_km,
+        "fastest_lap": fastest_lap,
         "coordinate_scale": scale,
         "n_corners": n_corners,
         "timestamp": datetime.now(IST).isoformat(),
@@ -134,71 +135,54 @@ def build_output(
     }
 
 
-def _path_length_meters(path_coords: List[Tuple[float, float]], scale: float) -> float:
-    """Compute the path length in meters using Euclidean distance."""
-    length_units = 0.0
-    for i in range(len(path_coords) - 1):
-        x1, y1 = path_coords[i]
-        x2, y2 = path_coords[i+1]
-        length_units += math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-    return length_units * scale
+# Floor for the speed used in time estimates, so a stationary sample can't make a segment infinite
+MIN_SPEED_KMH: float = 1.0
+
+
+def estimate_path_time(
+    path_coords: List[Tuple[float, float]], df_lap: pd.DataFrame, scale: float
+) -> float:
+    """Estimate how long a path takes, driven at the speeds of the driver's fastest lap.
+
+    Each segment's length (coordinate units x scale = metres) is divided by the speed of the
+    fastest-lap sample nearest to the segment's midpoint, and the segment times are summed.
+    On the driver's own lap this reproduces the real lap time to about 1 % (2023 R1 Q #1:
+    88.76 s estimated vs 89.708 s), which is the accuracy of any time comparison below.
+    """
+    pts = np.asarray(path_coords, dtype=float)
+    if len(pts) < 2:
+        return 0.0
+    mids = (pts[:-1] + pts[1:]) / 2.0
+    lengths_m = np.linalg.norm(np.diff(pts, axis=0), axis=1) * scale
+    _, nearest = cKDTree(df_lap[["X", "Y"]].to_numpy(dtype=float)).query(mids)
+    speeds_ms = np.maximum(df_lap["Speed"].to_numpy(dtype=float)[nearest], MIN_SPEED_KMH) / 3.6
+    return float((lengths_m / speeds_ms).sum())
 
 
 def compute_time_saved(
     result: SearchResult,
-    driver_path_coords: List[Tuple[float, float]],
-    grid: Dict[Tuple[int, int], GridNode],
+    driver_time_s: float,
+    df_lap: pd.DataFrame,
     scale: float
 ) -> Optional[float]:
-    """Estimate seconds saved by following the optimal path vs the driver's
-    actual path. Computed by comparing mean node speeds along each path, then
-    converting path length difference to time using mean speed.
+    """Seconds saved by a search path compared with the driver's fastest lap.
+
+    Both times come from estimate_path_time with the same fastest-lap speeds, so the comparison
+    is like-for-like. Positive = the path is estimated to be faster. Differences smaller than
+    about 1 % of a lap are within the estimate's error.
 
     Args:
         result: The search result (A*, Dijkstra, BFS).
-        driver_path_coords: The actual path coordinates of the driver.
-        grid: The node dictionary.
-        scale: The coordinate scale factor.
+        driver_time_s: estimate_path_time of the driver's full-resolution fastest lap.
+        df_lap: The fastest lap's telemetry (X, Y, Speed).
+        scale: Metres per coordinate unit.
 
     Returns:
-        The estimated time saved in seconds, or None if invalid.
+        The estimated time saved in seconds, or None if the search found no path.
     """
     if not result.found or len(result.path_coords) < 2:
         return None
-
-    def get_nearest_node_speed(pt: Tuple[float, float]) -> float:
-        min_dist = float('inf')
-        nearest_speed = 0.0
-        for node in grid.values():
-            dist = abs(node.center_x - pt[0]) + abs(node.center_y - pt[1])
-            if dist < min_dist:
-                min_dist = dist
-                nearest_speed = node.mean_speed
-        return nearest_speed
-
-    optimal_speeds = [get_nearest_node_speed(pt) for pt in result.path_coords]
-    optimal_mean_speed_kmh = sum(optimal_speeds) / len(optimal_speeds) if optimal_speeds else 0.0
-
-    driver_speeds = [get_nearest_node_speed(pt) for pt in driver_path_coords]
-    driver_mean_speed_kmh = sum(driver_speeds) / len(driver_speeds) if driver_speeds else 0.0
-
-    optimal_length = _path_length_meters(result.path_coords, scale)
-    driver_length = _path_length_meters(driver_path_coords, scale)
-
-    if optimal_mean_speed_kmh <= 0 or driver_mean_speed_kmh <= 0:
-        return None
-
-    optimal_time = optimal_length / (optimal_mean_speed_kmh / 3.6)
-    driver_time = driver_length / (driver_mean_speed_kmh / 3.6)
-    time_saved = driver_time - optimal_time
-
-    if time_saved > 5.0 or time_saved < -5.0:
-        logging.getLogger(__name__).warning(
-            f"Suspicious time_saved={time_saved:.2f}s - clamping to ±5s"
-        )
-        time_saved = max(-5.0, min(5.0, time_saved))
-
-    return round(float(time_saved), 3)
+    return round(driver_time_s - estimate_path_time(result.path_coords, df_lap, scale), 3)
 
 
 def save_output(data: dict, output_path: Path, logger: logging.Logger) -> None:
@@ -209,13 +193,22 @@ def save_output(data: dict, output_path: Path, logger: logging.Logger) -> None:
         output_path: The file path to save to.
         logger: The logger instance.
     """
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     logger.info(f"Saved racing line JSON: {output_path}")
 
 
-def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logger) -> pd.DataFrame:
-    """Fetch the fastest lap boundaries for the given driver."""
+def fetch_fastest_lap_bounds(
+    df: pd.DataFrame, driver: str, logger: logging.Logger
+) -> Optional[Tuple[pd.DataFrame, dict]]:
+    """Slice the driver's telemetry to their fastest lap, as reported by FastF1.
+
+    Returns:
+        (lap telemetry, {"lap_number", "lap_time_s"}), or None if FastF1 has no usable
+        fastest lap for this driver or the lap's time window holds no telemetry. Callers
+        must not fall back to the whole session: that mixes pit lanes, out-laps and every
+        lap into one "driver path".
+    """
     import fastf1
     try:
         enable_fastf1_cache()
@@ -230,17 +223,27 @@ def fetch_fastest_lap_bounds(df: pd.DataFrame, driver: str, logger: logging.Logg
         session = fastf1.get_session(year, round_val, session_name)
         session.load(telemetry=False, weather=False, messages=False)
         lap = session.laps.pick_drivers(driver).pick_fastest()
-        start_t = lap["LapStartTime"]
-        end_t = lap["Time"]
-
-        df_lap = df[(df["SessionTime"] >= start_t) & (df["SessionTime"] <= end_t)]
-        if df_lap.empty:
-            logger.warning("Fastest lap empty in telemetry, falling back to full session.")
-            return df
-        return df_lap
     except Exception as e:
-        logger.warning(f"Could not fetch fastest lap bounds: {e}. Falling back to full session.")
-        return df
+        logger.error(f"Could not fetch the fastest lap from FastF1: {e}")
+        return None
+
+    # pick_fastest() returns None (or an empty lap) when the driver set no valid timed lap
+    if lap is None or len(lap) == 0 or pd.isna(lap["LapStartTime"]) or pd.isna(lap["Time"]):
+        logger.error(f"FastF1 has no valid fastest lap for driver {driver}.")
+        return None
+
+    df_lap = df[(df["SessionTime"] >= lap["LapStartTime"]) & (df["SessionTime"] <= lap["Time"])]
+    if df_lap.empty:
+        logger.error("The fastest lap's time window contains no telemetry rows.")
+        return None
+
+    lap_time = lap.get("LapTime")
+    info = {
+        "lap_number": int(lap["LapNumber"]) if pd.notna(lap.get("LapNumber")) else None,
+        "lap_time_s": round(lap_time.total_seconds(), 3) if pd.notna(lap_time) else None,
+    }
+    logger.info(f"Fastest lap: lap {info['lap_number']}, {info['lap_time_s']} s, {len(df_lap)} rows")
+    return df_lap, info
 
 
 def log_racing_line_complete(args, stem, grid, scale, astar_r, astar_ts, dijkstra_r, dijkstra_ts, bfs_r, astar_cost_bfs, bfs_ts, output_path, logger):

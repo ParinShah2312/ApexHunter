@@ -43,23 +43,9 @@ class TestTelemetryDtypes(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def test_speed_dtype_is_float32(self):
-        self.assertEqual(self.df["Speed"].dtype, np.dtype("float32"))
-
-    def test_rpm_dtype_is_float32(self):
-        self.assertEqual(self.df["RPM"].dtype, np.dtype("float32"))
-
-    def test_throttle_dtype_is_float32(self):
-        self.assertEqual(self.df["Throttle"].dtype, np.dtype("float32"))
-
-    def test_brake_dtype_is_float32(self):
-        self.assertEqual(self.df["Brake"].dtype, np.dtype("float32"))
-
-    def test_x_dtype_is_float32(self):
-        self.assertEqual(self.df["X"].dtype, np.dtype("float32"))
-
-    def test_y_dtype_is_float32(self):
-        self.assertEqual(self.df["Y"].dtype, np.dtype("float32"))
+    def test_telemetry_columns_downcast_to_float32(self):
+        for col in ("Speed", "RPM", "Throttle", "Brake", "X", "Y"):
+            self.assertEqual(self.df[col].dtype, np.dtype("float32"), col)
 
 
 if __name__ == "__main__":

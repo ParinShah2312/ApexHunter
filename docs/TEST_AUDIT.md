@@ -32,7 +32,7 @@ Started October 2026. Status legend: ✅ fixed · ⏳ to do · 🔗 handled by a
 | A5 | `unit/test_io_saving` | Checks files exist but never reads the saved parquet back; `mistake_rate_pct` value never checked. | Weak | ✅ |
 | A6 | `unit/test_racing_line_search` | Every search graph has uniform costs, so A\*/Dijkstra vs BFS behave identically; nothing shows cost-aware search avoiding expensive (braking) cells. | Gap | ✅ |
 | A7 | `unit/test_racing_line_io::test_compute_time_saved_returns_float_or_none` | The function always returns float or None. | Can't fail | ✅ |
-| A8 | `unit/test_racing_line_grid::test_compute_coordinate_scale_returns_float` | Checks 0.001 ≤ scale ≤ 1, which the code clamps to anyway. No known-geometry check. | Can't fail | ✅ |
+| A8 | `unit/test_racing_line_grid::test_compute_coordinate_scale_returns_float` | Checks 0.001 ≤ scale ≤ 1, which the code clamps to anyway. No known-geometry check. | Can't fail | ✅ (estimator later removed by #18; replaced by a known-circle lap-length test) |
 | A9 | `unit/test_racing_line_grid::test_get_nearest_node_finds_closest` | Queries a cell that is itself a node, so the answer is trivially itself; the off-grid case (the real use) is untested. | Trivial | ✅ |
 | A10 | `unit/test_racing_line_grid`, `integration/test_racing_line_pipeline` | Random speeds/brakes with no seed → non-deterministic tests. | Flaky risk | ✅ |
 | A11 | `unit/test_racing_line_search` | `run_full_lap` (stitching the 4 lap segments) untested; deviation only tested for identical paths. | Gap | ✅ |
@@ -63,6 +63,47 @@ suite went from 249 to 230 tests, every one checking real behaviour, and coverag
 ones did not, e.g. removing negative speed-delta clipping passed the old feature tests but fails
 the new ones. Remaining open: A3, A4, A20 (Isolation Forest, rewritten in roadmap §B).
 
+### Round 2 result (October 2026): keep only essential tests
+
+Rule applied (now in ROADMAP §3): every test must guard real behaviour of a main feature and would
+fail on a realistic regression. Padding (trivial shape/type/file-exists checks, unchanged
+behaviour, near-duplicates, tests of test tooling) was removed. Bug fixes from the October review
+are proven mainly by real-data runs recorded in PROJECT_DOCUMENTATION §8, so removing a unit test
+does not remove that evidence.
+
+| Removed | Tests | Why |
+|---|---|---|
+| Old Isolation Forest unit tests: `test_features`, `test_model_grid_search`, `test_model_inference`, `test_model_training`, `test_mistakes_io` | 38 | Pin the old, flawed method that the rework replaces (19 are mock-only, A3; one asserts the "target can be its own reference" bug). The rework writes new real-model tests (ISOLATION_FOREST_REWORK §0.5). |
+| Old Isolation Forest integration tests: `test_pipeline_correctness`, `test_pipeline_schema`, `test_pipeline_outputs` | 21 | Two files failed (stale schema A20; correctness catches the real tuning bug); all check the old features/meta. Replaced in the rework. Kept: `test_pipeline_edge_cases`, `test_pipeline_skip_force` (behaviour the rework keeps). |
+| Telemetry dtype checks (5 of 6 merged into one), `.snappy`/directory-size helpers (3) | 8 | One test now checks all six columns; helpers are trivia. |
+| Dashboard: "slower pace is red" (unchanged behaviour), empty-frame rate, card millisecond rounding, rendered-sidebar duplicate of the static selectbox scan, empty overlap input | 5 | Edge cases or duplicates; the dashboard is being redesigned (§E). |
+| Test runner "fully skipped file" output; LSTM output shape; stint index / empty laps; JSON save round trip; wheel ints | 6 | Tooling or trivial. |
+| Racing-line integration "file created" / "JSON valid"; tyre integration "training completes", "config keys", "output exists", "floats" | 6 | Implied by the remaining tests (the fixture fails if the file is missing). |
+
+Result: **168 tests** (24 unit files / 140 tests, 5 integration files / 28 tests), all passing,
+none skipped, down from 252 tests with 2 failing files. A3, A4 and A20 are closed by deletion;
+their replacements are part of the Isolation Forest rework.
+
+### Round 3 result (October 2026): no mock tests
+
+Of the 168 tests, 12 replaced real behaviour with mocks, and the racing-line integration fixture
+faked FastF1 for its whole file. Decision (user): no mock tests.
+
+| Change | Tests | Detail |
+|---|---|---|
+| Racing-line integration rewritten on real data | 11 → 4 | Runs the real pipeline on `2023_1_Q.parquet`, car #1, with the real FastF1 cache; checks lap 14 / 89.708 s, 66 path points, scale 0.1 and ~5.34 km, time estimate within 2 % of the real lap, A\* = Dijkstra < BFS. |
+| LSTM integration rewritten on real data | 7 → 4 | Trains a small model (temp folder, never `models/`) on real 2024 R1–R3 races, holds out R4, predicts car #1 in R4 with real FastF1 laps; checks the session split, saved feature list, prediction windows, and predicted lap times within 10 % of the real ones. |
+| Deleted (mocked FastF1, MC dropout, file processing or test-runner internals) | 10 | `test_racing_line_io` fastest-lap lookup (4, now covered by the real integration test), `test_project_config` cache and log-encoding (3), `test_test_runner` (1), LSTM cliff rule (1, revisited in ROADMAP §D), chronological processing (1, `session_sort_key` test kept). |
+| Deleted (unnecessary) | 3 | Index-split fallback (dead path), duplicate empty-contour test, turn-label suffix. |
+
+Kept on purpose: `test_frame_selection.py` patches module *constants* (the frames/output folders
+and season list) so the real selection code runs on real files in a temp folder. No behaviour is
+faked; only paths are redirected.
+
+Result: **145 tests** (23 unit files / 127 tests, 5 integration files / 18 tests), all passing,
+none skipped. The integration tests need the local `data_lake/` and `cache/` and are skipped
+(not failed) without them.
+
 ## 3. Untested code (coverage 0 %)
 
 Decision (user, Oct 2026): YOLO/CV inference and Big Data code are last semester's frozen work;
@@ -82,6 +123,6 @@ Decision (user, Oct 2026): YOLO/CV inference and Big Data code are last semester
 | Roadmap # | Bug |
 |---|---|
 | 16 ✅ | `cv/select_training_frames.py` takes every `len // 11`-th frame then the first 11, so the end of each video is never sampled (~last 10 s of a 460-frame video; videos under 22 frames get only their first 11 frames). The docs promise evenly spaced frames. |
-| 17 ✅ | `racing_line/racing_line_grid.find_start_end_nodes` maps rows to grid cells using the min X/Y of samples with Speed > 10, but `build_grid` uses the min of all samples, so start cells can be shifted. |
+| 17 ✅ | `racing_line/racing_line_grid.find_start_end_nodes` maps rows to grid cells using the min X/Y of samples with Speed > 10, but `build_grid` uses the min of all samples, so start cells can be shifted. (The function was later removed as unused by #19.) |
 | #9 (part) ✅ | Log lines containing `→` were dropped with a "Logging error" when stdout is redirected on Windows (cp1252); fixed project-wide in `utils.setup_logger`. |
 | — ✅ | `racing_line_io.fetch_fastest_lap_bounds` used FastF1's deprecated `pick_driver` (to be removed); switched to `pick_drivers`. |

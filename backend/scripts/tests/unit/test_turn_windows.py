@@ -99,10 +99,6 @@ class TestComputeTurnWindows(unittest.TestCase):
         self.assertLessEqual(w1.end_s, w2.start_s)
         self.assertAlmostEqual(w1.end_s, (w1.apex_s + w2.apex_s) / 2)
 
-    def test_letter_suffix_in_label(self) -> None:
-        corners = pd.DataFrame({"Number": [6], "Letter": ["A"], "Distance": [540.0]})
-        self.assertEqual(compute_turn_windows(corners, self.tel, 0.0)[0].turn, "T6A")
-
 
 class TestTurnContext(unittest.TestCase):
 

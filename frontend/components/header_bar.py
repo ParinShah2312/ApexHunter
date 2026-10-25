@@ -3,15 +3,17 @@ ApexHunter Frontend - Header Bar
 Renders the persistent KPI strip above the tabs.
 """
 
+from pathlib import Path
 from typing import Tuple
 
 import fastf1
 import streamlit as st
 
+from components.data_loader import FASTF1_LOOKUP_TTL_S
 from config import TEAM_MAPPING
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
 
 
 def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number: str) -> str:
@@ -29,18 +31,14 @@ def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number
         return "—"
 
 
-def _parse_session_label(session_label: str) -> Tuple[int, str]:
-    """Parse 'Round N: EventName - SessionType' → (round_num, session_type_code).
-    Returns (0, 'Q') on parse failure."""
-    try:
-        round_num = int(session_label.split("Round ")[1].split(":")[0])
-        if "Race" in session_label: session_type = "R"
-        elif "Qualifying" in session_label: session_type = "Q"
-        elif "Sprint" in session_label: session_type = "Sprint"
-        else: session_type = "Q"
-        return (round_num, session_type)
-    except Exception:
-        return (0, "Q")
+def session_from_file(session_filepath: str) -> Tuple[int, str]:
+    """Return (round, session code) from a clean_data file name like '2024_1_Q.parquet'.
+
+    The file name is authoritative; parsing the label text fell back to Race when the FastF1
+    schedule was unavailable and turned "Sprint Shootout" into "Sprint".
+    """
+    parts = Path(session_filepath).stem.split("_")
+    return int(parts[1]), parts[2]
 
 
 def _driver_identity_html(driver_number: str, driver_name: str, team_name: str) -> str:
@@ -66,7 +64,7 @@ def render_header_bar(sel) -> None:
     cols = st.columns([3, 1.5, 1.5, 1.5])
 
     # Derive round_num and session_type
-    round_num, session_type = _parse_session_label(sel.session_label)
+    round_num, session_type = session_from_file(sel.session_filepath)
 
     # Extract track name from session label ("Round N: TrackName - Session")
     try:
