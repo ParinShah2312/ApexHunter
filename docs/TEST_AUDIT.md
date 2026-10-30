@@ -110,7 +110,8 @@ CI follow-up (30 Oct 2026): the first container run executed all 127 unit tests 
 and exposed one stale AppTest selector in `test_frontend_selectboxes`. Streamlit now represents
 HTML using a typed element, so selecting only `UnknownElement` missed the real keyboard-lock
 script. The existing test now uses `at.get("html")` and keeps the assertions on the script
-contents and `unsafe_allow_javascript`; no test or assertion was removed. CI rerun pending.
+contents and `unsafe_allow_javascript`; no test or assertion was removed. The follow-up GitHub
+run passed all 127 unit tests in 23 files with zero skips, plus Streamlit's HTTP startup check.
 
 Decision (user, Oct 2026): YOLO/CV inference and Big Data code are last semester's frozen work;
 **no new tests will be written for them.** The list is kept for reference only.
