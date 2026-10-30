@@ -14,7 +14,7 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 > **Course alignment:** which taught techniques we use, and why, is in
 > [COURSE_ALIGNMENT.md](COURSE_ALIGNMENT.md).
 
-## 0. Current status and next steps (updated 2026-10-25)
+## 0. Current status and next steps (updated 2026-10-29)
 
 | Step | Status | Where |
 |---|---|---|
@@ -25,6 +25,7 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 | 5. LSTM rework: #22 fixes, vanilla RNN vs LSTM, LSTM autoencoder, real-data retrain | ⏳ | §2D |
 | 6. Generate model outputs for more sessions/drivers | ⏸ After all model work (#7). | §2A |
 | 7. Dashboard UI redesign | ⏳ Last. | §2E |
+| CI/CD infrastructure | ✅ Workflow, Docker packaging and setup documentation added. Local static checks passed; the first GitHub run and hosting integration remain unverified. | [CI_CD.md](CI_CD.md) |
 
 **What exists today:** model outputs for one session/driver each (mistakes and tyre: 2023 R1 race,
 #1; racing line: 2023 R1 qualifying, #1; CV: 2024 Bahrain pole lap). The saved LSTM is an old

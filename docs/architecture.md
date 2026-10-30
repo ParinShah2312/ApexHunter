@@ -55,4 +55,14 @@ One session-time position (`st.session_state["scrub_seconds"]`, managed by
 `components/scrubber.py`) drives every tab; the master scrubber and the Telemetry-tab slider are
 two linked widgets on it.
 
+## 6. CI/CD
+
+`.github/workflows/ci-cd.yml` builds a Python 3.12 CPU Docker image, checks fatal Python errors
+and dependency compatibility, runs the existing unit tests, and checks Streamlit's HTTP health
+endpoint. On pushes to `main`, the same tested image is published to GHCR with commit-SHA and
+`latest` tags. An optional deployment webhook runs after publication; without a configured host,
+live deployment is skipped. Models, the data lake and FastF1 cache are supplied through persistent
+storage rather than included in the image. See [CI_CD.md](CI_CD.md) for setup, the YAML explanation
+and validation limits; real-data integration tests remain local.
+
 See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for details and current limitations.

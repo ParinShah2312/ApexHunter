@@ -646,6 +646,10 @@ is decided in [ROADMAP.md](ROADMAP.md).
 The step-by-step plan and the rules for working on the project are in ROADMAP §0 and §3.
 
 ### Working
+- CI/CD configuration added (29 Oct 2026): Docker build, fatal-error/dependency checks, unit
+  tests and Streamlit startup check; GHCR publication on pushes to `main` and an optional
+  deployment hook. Local static checks passed; full CI execution/publication and hosting are
+  unverified. See [CI_CD.md](CI_CD.md) for the YAML explanation and activation steps.
 - Telemetry download and cleaning for all 92 sessions; Spark, HDFS and MongoDB integration (last run May 2026).
 - Isolation Forest, racing-line and CV inference pipelines run end to end.
 - Dashboard with all five tabs.
@@ -824,6 +828,11 @@ The step-by-step plan and the rules for working on the project are in ROADMAP §
   removed (`ruff check --select F` now passes).
 
 ### Known issues (to be fixed)
+
+CI/CD operational limits: no hosting is configured, so live deployment is skipped. Real-data
+integration tests are not run in CI; the dataset, cache and models must be supplied separately.
+The first GitHub run is still required to verify the full Docker build/test/publication path.
+Existing Python requirements remain unpinned. See [CI_CD.md](CI_CD.md).
 
 | # | Area | Issue |
 |---|---|---|
