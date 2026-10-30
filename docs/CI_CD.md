@@ -156,7 +156,13 @@ Local checks cover workflow YAML structure, Bash syntax, Dockerfile/configuratio
 Ruff's fatal-error checks, and whitespace checks. Full Docker build, unit execution inside the
 image, GHCR publication and the deployment hook must be verified by the first GitHub Actions
 run. Docker Engine was not running locally and the local Python environment did not have the
-application dependencies installed. No GitHub push or live deployment was performed.
+application dependencies installed.
+
+First GitHub run (30 Oct 2026): Docker build, Ruff and dependency checks passed. All 127 unit
+tests ran with zero skips; one existing AppTest selector failed because it assumed HTML blocks
+were `UnknownElement` instances. The test now uses the public `at.get("html")` API without
+weakening its assertions. Verification of that repair, HTTP startup and publication is pending
+the next CI run. No live deployment has been performed.
 
 References: [GitHub workflow syntax](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions),
 [GitHub container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry),

@@ -106,6 +106,12 @@ none skipped. The integration tests need the local `data_lake/` and `cache/` and
 
 ## 3. Untested code (coverage 0 %)
 
+CI follow-up (30 Oct 2026): the first container run executed all 127 unit tests without skips
+and exposed one stale AppTest selector in `test_frontend_selectboxes`. Streamlit now represents
+HTML using a typed element, so selecting only `UnknownElement` missed the real keyboard-lock
+script. The existing test now uses `at.get("html")` and keeps the assertions on the script
+contents and `unsafe_allow_javascript`; no test or assertion was removed. CI rerun pending.
+
 Decision (user, Oct 2026): YOLO/CV inference and Big Data code are last semester's frozen work;
 **no new tests will be written for them.** The list is kept for reference only.
 

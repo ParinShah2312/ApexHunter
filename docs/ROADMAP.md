@@ -14,7 +14,7 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 > **Course alignment:** which taught techniques we use, and why, is in
 > [COURSE_ALIGNMENT.md](COURSE_ALIGNMENT.md).
 
-## 0. Current status and next steps (updated 2026-10-29)
+## 0. Current status and next steps (updated 2026-10-30)
 
 | Step | Status | Where |
 |---|---|---|
@@ -25,7 +25,7 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 | 5. LSTM rework: #22 fixes, vanilla RNN vs LSTM, LSTM autoencoder, real-data retrain | ⏳ | §2D |
 | 6. Generate model outputs for more sessions/drivers | ⏸ After all model work (#7). | §2A |
 | 7. Dashboard UI redesign | ⏳ Last. | §2E |
-| CI/CD infrastructure | ✅ Workflow, Docker packaging and setup documentation added. Local static checks passed; the first GitHub run and hosting integration remain unverified. | [CI_CD.md](CI_CD.md) |
+| CI/CD infrastructure | 🔄 Docker build, Ruff and dependency checks passed on GitHub. First run exposed stale AppTest HTML lookup (#41); repaired, CI rerun pending. Hosting remains unconfigured. | [CI_CD.md](CI_CD.md) |
 
 **What exists today:** model outputs for one session/driver each (mistakes and tyre: 2023 R1 race,
 #1; racing line: 2023 R1 qualifying, #1; CV: 2024 Bahrain pole lap). The saved LSTM is an old
@@ -113,6 +113,7 @@ In total: 3 DSML methods (Z-score, Isolation Forest, Ridge) and 3 DL models (RNN
 | 38 | **L** Cleanup: unused imports/variables/f-strings (ruff), unused constants (`COLOR_*`, `ALGO_LABELS`, `STRAIGHT_THRESHOLD`), dead `_fetch_anomaly_distribution` + `mongo_manager.get_anomaly_score_distribution`; caches deleted. **Kept on purpose:** the switched-off optimal-line/ghost-car traces in `track_map.py` (may be used by the UI redesign), unused function arguments (signature changes ripple into callers), `MIN_POINTS_PER_CELL` (a tunable that is currently a no-op). | ✅ |
 | 39 | **H** Racing line "time saved" is not meaningful: path time = length ÷ mean speed of the cells it passes, with cell speeds averaged over the whole session (out-laps included), so A\* gains just by passing through fast cells. 2023 R1 Q #1: driver's lap estimated at 110.5 s (real 89.7 s), A\* "saves" ~9 s although its path is longer; clamped to 5.0 for all three algorithms. Found while fixing #18/#19 (the old clamp hid it). **Fix:** time = Σ segment length ÷ speed of the nearest fastest-lap sample (scipy cKDTree), applied identically to the driver's full-resolution lap and to each search path; clamp removed. Validated: driver's lap 88.76 s vs real 89.708 s (1 %). New result: A\*/Dijkstra −0.079 s, BFS −0.104 s (no faster line, within error). Rejected alternative: per-cell fastest-lap speeds (half the cells have no sample at 5 m resolution). | ✅ |
 | 40 | **M** Spark's numeric-column check compared `str(dtype)` with names like `"DoubleType"`, but PySpark 3.5 prints `"DoubleType()"`, so the forward-fill never ran (previously listed only in PROJECT_DOCUMENTATION §8). **Fix:** `isinstance` check; fixed together with #27's fill window. No data impact (raw data has no gaps). | ✅ |
+| 41 | CI's first full unit run found that the dashboard keyboard-lock test assumed HTML elements were Streamlit `UnknownElement` instances. Use public `at.get("html")` and retain the script/JavaScript assertions. | 🔄 Fixed in code; CI rerun pending. |
 | — | Isolation Forest items found in this review are folded into §B: `speed_delta` per *sample* is inconsistent because sample spacing varies 0.014–0.76 s; `--reference` file is not column-validated; features computed twice. | 🔗 §B |
 
 **Bug fixes are project-wide:** "frozen" means no new features. Bugs are still fixed everywhere,
@@ -184,7 +185,7 @@ These apply to everyone (and to AI assistants) working on the project.
 - After every code change, update the affected docs in the same piece of work: this file's status
   column, `PROJECT_DOCUMENTATION.md` (the method sections and §8 "Fixed" / "Known issues"),
   `README.md`, `architecture.md` and any other doc that describes the changed behaviour.
-- Every bug discovered along the way is added to the table in §2A immediately (next number: #41),
+- Every bug discovered along the way is added to the table in §2A immediately (next number: #42),
   even if it isn't fixed straight away. The project is known to have undiscovered bugs.
 - Last semester's `.docx` / `.pdf` files in `docs/` are kept unchanged as historical record.
 

@@ -54,8 +54,7 @@ class TestDropdownKeyLock(unittest.TestCase):
         finally:
             os.chdir(cwd)
         self.assertFalse(at.exception, [e.value for e in at.exception])
-        html_blocks = [el.proto for el in at.main.children.values()
-                       if type(el).__name__ == "UnknownElement" and el.type == "html"]
+        html_blocks = [el.proto for el in at.get("html")]
         locks = [p for p in html_blocks if "Backspace" in p.body and "Delete" in p.body
                  and 'data-baseweb="select"' in p.body]
         self.assertEqual(len(locks), 1)

@@ -63,6 +63,7 @@ endpoint. On pushes to `main`, the same tested image is published to GHCR with c
 `latest` tags. An optional deployment webhook runs after publication; without a configured host,
 live deployment is skipped. Models, the data lake and FastF1 cache are supplied through persistent
 storage rather than included in the image. See [CI_CD.md](CI_CD.md) for setup, the YAML explanation
-and validation limits; real-data integration tests remain local.
+and validation limits; real-data integration tests remain local. Dashboard AppTest checks query
+HTML through `at.get("html")`, independent of Streamlit's internal element class names.
 
 See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) for details and current limitations.

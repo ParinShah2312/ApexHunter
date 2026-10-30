@@ -118,7 +118,9 @@ python backend/scripts/tests/run_tests.py --file test_racing_line_pipeline.py   
 GitHub Actions checks every branch push and pull request, builds a CPU Docker image, runs the
 existing unit tests and checks Streamlit startup. Successful pushes to `main` publish the tested
 image to GitHub Container Registry. Live deployment is skipped until an optional hosting webhook
-is configured. Setup, limitations and the YAML explanation: **[docs/CI_CD.md](docs/CI_CD.md)**.
+is configured. The dashboard keyboard-lock test uses AppTest's public HTML lookup to support
+current Streamlit releases. Setup, limitations and the YAML explanation:
+**[docs/CI_CD.md](docs/CI_CD.md)**.
 
 ### Optional: Big Data stack
 Requires a local Hadoop/HDFS (`hdfs://localhost:9000`) and MongoDB (`localhost:27017`).

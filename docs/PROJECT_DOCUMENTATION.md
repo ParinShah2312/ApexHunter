@@ -656,6 +656,11 @@ The step-by-step plan and the rules for working on the project are in ROADMAP §
 - Test suite: 145 tests, all passing (127 unit + 18 integration); no mock tests (test audit rounds 2–3).
 
 ### Fixed
+- **30 Oct 2026 – CI dashboard test compatibility.** The first container run passed Docker
+  build, Ruff and dependency checks and ran all 127 unit tests without skips. The dropdown-lock
+  test failed because it selected only Streamlit's former `UnknownElement` representation.
+  It now uses `at.get("html")` while retaining its real script and JavaScript-flag assertions.
+  The CI rerun is pending; see [CI_CD.md](CI_CD.md).
 - **Oct 2026 – Binary brake handling.** `Brake` is now treated as an on/off flag across cleaning
   (pandas and Spark clip 0–1), Isolation Forest features, racing-line node cost and the dashboard.
   The Telemetry tab shows "Brake (on/off)" as a step line, brake overlap means brake on and
