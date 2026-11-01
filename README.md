@@ -9,14 +9,15 @@ deep learning and graph search, and shows the results in an interactive Streamli
 
 | Component | Technique | Course |
 |---|---|---|
-| Driver mistake detection | Isolation Forest + engineered telemetry features, K-fold contamination search | DSML |
+| Driver mistake detection | Isolation Forest on deviations from the 5 fastest other drivers at the same track position (slipstream/DRS samples left out), scored per planted mistake and by real time lost; compared with a Z-score baseline | DSML |
 | Racing-line search | A\*, Dijkstra, BFS on a telemetry-weighted grid | DSML |
 | Tyre cliff prediction | 2-layer LSTM, grid search, Monte Carlo dropout uncertainty | Deep Learning |
 | Apex detection | YOLOv11-Seg fine-tuned on 506 hand-labelled onboard frames | Deep Learning |
 | Data pipeline | pandas ETL + Apache Spark, HDFS, MongoDB | Supporting infrastructure |
 
 Full technical write-up: **[docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md)**.
-Current limitations are tracked in §8 of that document.
+Current limitations are tracked in §8 of that document. Mistake detection (Isolation Forest vs
+Z-score) in full: **[docs/ISOLATION_FOREST_REWORK.md](docs/ISOLATION_FOREST_REWORK.md)**.
 Semester plan and scope decisions: **[docs/ROADMAP.md](docs/ROADMAP.md)**. Planned: Z-score vs
 Isolation Forest vs LSTM autoencoder for mistake detection, and Ridge vs RNN vs LSTM for tyre/pace
 prediction. Current progress, next steps and the rules for contributing (documentation, testing,
@@ -41,10 +42,10 @@ ApexHunter 2.0/
 │       ├── bigdata/                 # hdfs_manager, spark_clean_telemetry, mongo_manager
 │       ├── cv/                      # extract_frames, select_training_frames, extract_turns,
 │       │                            #   run_inference + inference_{geometry,masking,hud,io}
-│       ├── isolation_forest/        # mistakes_features, mistakes_model, mistakes_io
+│       ├── isolation_forest/        # mistakes_features, mistakes_model, mistakes_eval, mistakes_events, mistakes_timeloss, mistakes_io
 │       ├── lstm/                    # tyre_data, tyre_model, tyre_io
 │       ├── racing_line/             # racing_line_grid, racing_line_search, racing_line_io
-│       └── tests/                   # unit/ (23 files, 127 tests), integration/ (5 files, 18 tests), run_tests.py
+│       └── tests/                   # unit/ (24 files, 129 tests), integration/ (6 files, 24 tests), run_tests.py
 ├── frontend/
 │   ├── app.py                       # Streamlit entry point
 │   ├── config.py                    # paths, driver/team mappings, colours
@@ -59,7 +60,8 @@ ApexHunter 2.0/
 │   ├── processed_video/ processed_csv/
 │   └── hdfs_status.json  spark_run_log.json  mongo_status.json
 ├── cache/                           # FastF1 HTTP cache (gitignored)
-├── docs/                            # project documentation (+ previous-semester submission files)
+├── docs/                            # PROJECT_DOCUMENTATION, ROADMAP, ISOLATION_FOREST_REWORK;
+│                                    #   LAST_SEM/ (previous semester), ARCHIVE/ (merged docs)
 └── requirements.txt
 ```
 
@@ -88,6 +90,7 @@ python backend/scripts/etl/clean_telemetry.py           # → data_lake/clean_da
 ```bash
 # Isolation Forest mistake detection
 python backend/scripts/detect_mistakes.py --session data_lake/clean_data/2023_1_R.parquet --driver 1
+#   add --compare to also score the Z-score baseline on the same planted mistakes
 
 # LSTM tyre cliff (train once, then predict)
 python backend/scripts/train_lstm.py --force
@@ -129,7 +132,7 @@ python backend/scripts/bigdata/mongo_manager.py --upload --stats
 |---|---|
 | **Race Intelligence** | Master time scrubber, YOLO HUD video with live apex status and turn report card, speed/mistake track map |
 | **Telemetry** | Speed, throttle, brake, gear and RPM traces; top speed and brake/throttle overlap % (samples ≥ 50 km/h) |
-| **AI Analysis** | Isolation Forest mistakes per lap; LSTM tyre-cliff chart with confidence band |
+| **AI Analysis** | Isolation Forest mistake events (map markers per lap, all events, most costly first, with corner location, time lost and reason); LSTM tyre-cliff chart with confidence band |
 | **Racing Line** | Driver's fastest lap vs A\* / Dijkstra / BFS path, deviation per turn |
 | **Big Data** | Pipeline DAG, HDFS/Spark statistics, EDA charts, MongoDB leaderboard |
 
@@ -148,10 +151,8 @@ python backend/scripts/bigdata/mongo_manager.py --upload --stats
 
 ---
 
-## 👥 Team
+## 👤 Author
 
 | Name | Enrolment No. |
 |---|---|
 | Parin Shah | 23001091 |
-| Ayush Parikh | 23000936 |
-| Malav Joshi | 23001119 |

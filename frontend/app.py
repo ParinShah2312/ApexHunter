@@ -158,6 +158,9 @@ _parquet_mtime = _os.path.getmtime(sel.mistake_parquet_path) if _os.path.exists(
 _meta_mtime = _os.path.getmtime(sel.mistake_meta_path) if _os.path.exists(sel.mistake_meta_path) else 0
 df_mistakes = load_mistake_data(sel.mistake_parquet_path, mtime=_parquet_mtime)
 meta = load_mistake_meta(sel.mistake_meta_path, mtime=_meta_mtime)
+_events_path = sel.mistake_meta_path.replace("_mistakes_meta.json", "_mistakes_events.json")
+_events_mtime = _os.path.getmtime(_events_path) if _os.path.exists(_events_path) else 0
+mistake_events = load_mistake_meta(_events_path, mtime=_events_mtime)     # same JSON loader
 racing_line_data = load_racing_line(sel.racing_line_path)
 tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
@@ -255,6 +258,7 @@ with tab3:
         df_session=sel.df_driver,
         scrub_seconds=st.session_state.get("scrub_seconds", 0.0),
         tyre_data=tyre_data,
+        mistake_events=mistake_events,
     )
 
 with tab4:

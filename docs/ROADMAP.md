@@ -1,7 +1,7 @@
 # ApexHunter 2.0 — Semester Roadmap (AY 2026–27)
 
 **Courses:** Data Science & Machine Learning (DSML) · Deep Learning (DL)
-**Team:** Parin Shah (23001091), Ayush Parikh (23000936), Malav Joshi (23001119)
+**Student:** Parin Shah (23001091)
 
 This file records **what we will and won't work on this semester**, so scope decisions don't need
 to be re-discussed. Update the status column as items progress. Technical details of each bug are
@@ -11,16 +11,13 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 
 ---
 
-> **Course alignment:** which taught techniques we use, and why, is in
-> [COURSE_ALIGNMENT.md](COURSE_ALIGNMENT.md).
-
 ## 0. Current status and next steps (updated 2026-10-25)
 
 | Step | Status | Where |
 |---|---|---|
-| 1. Bug fixes | ✅ Done: #1–#40 fixed, except #8/#9 (finished by step 3) and #22 (moved to step 5). | §2A |
-| 2. Test audit, rounds 2–3 | ✅ Done: 252 → 145 tests, all passing; no mock tests (racing-line and LSTM integration tests now run on real data); old Isolation Forest tests deleted for replacement in step 3. | [TEST_AUDIT.md](TEST_AUDIT.md) |
-| 3. Isolation Forest rework + Z-score baseline | ⏳ **Next.** Five phases with a check-in after each. Read "Before you start" in the design doc first. | §2B, [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md) |
+| 1. Bug fixes | ✅ Done: #1–#40 fixed (#8/#9 by step 3), except #22 (moved to step 5). #41 logged for step 7. | §2A |
+| 2. Test audit, rounds 2–3 | ✅ Done: 252 → 145 tests (159 after the IF rework and review), all passing; no mock tests (racing-line and LSTM integration tests now run on real data); old Isolation Forest tests deleted for replacement in step 3. | [ARCHIVE/TEST_AUDIT.md](ARCHIVE/TEST_AUDIT.md) |
+| 3. Isolation Forest rework + Z-score baseline | ✅ **Done** (Oct 2026), all 5 phases. Deviation-from-the-field features (braking 95 % → 29–49 % of flags), planted-mistake evaluation (PR-AUC 0.19–0.25, 8–12× random), ranked events with reasons, Z-score baseline (per-mistake mean F1 0.284 vs IF 0.343; IF better on lock-ups and missed downshifts). User review (2026-10-31): traffic filter (DRS / < 1 s behind), events ≥ 0.5 s only (27–31 per race; 32–40 since the merge gap became 1 s on 2026-11-01), corner names, capitalised reasons: done. Combined "both agree" output: not done (user decision; three separate detectors are compared instead). ⏸ Step 4 waits for the user. | §2B, [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md) |
 | 4. Ridge regression baseline | ⏳ | §2C |
 | 5. LSTM rework: #22 fixes, vanilla RNN vs LSTM, LSTM autoencoder, real-data retrain | ⏳ | §2D |
 | 6. Generate model outputs for more sessions/drivers | ⏸ After all model work (#7). | §2A |
@@ -32,7 +29,7 @@ Status legend: ✅ done · 🔄 in progress · ⏳ planned · ⏸ deferred · �
 
 ## 1. Scope decisions
 
-**Guiding principle (team decision, Oct 2026): few algorithms, clear story.** Each problem is
+**Guiding principle (decision, Oct 2026): few algorithms, clear story.** Each problem is
 solved with a simple baseline → a machine-learning model → a deep-learning model, so the work is
 easy to explain and every method maps to course material.
 
@@ -43,23 +40,39 @@ easy to explain and every method maps to course material.
 
 In total: 3 DSML methods (Z-score, Isolation Forest, Ridge) and 3 DL models (RNN, LSTM, LSTM autoencoder).
 
+**Course alignment** (DSML CMP707 slides/notebooks and DL Units 1–2, reviewed Oct 2026; the DSML
+project is worth 20 marks and is linked with the CMP708 project evaluation, so one project serves
+both subjects):
+
+| Method | Where it is taught |
+|---|---|
+| Z-score, Isolation Forest, autoencoders | DSML 4.3 Anomaly Detection p6 ("Approaches to anomaly detection") |
+| Ridge regression | DSML `LinearReg.ipynb`; metrics 3.1 p10–14 |
+| Vanilla RNN | DL NN deck p61–72 (RNN, BPTT) |
+| LSTM | DL NN deck p74–85 (vanishing gradients; LSTM as the remedy); U1 p7–8 |
+| Evaluation | confusion matrix, precision, recall, F1 (3.1 p8–16); MAE, MSE, RMSE, R², MAPE (3.1 p10–14); train vs test error (3.1 p38–39; U2 p34–35) |
+| Report only | descriptive statistics and correlation (2.1; 3.1 p33–35); preprocessing (3.1 p28–30); CNN theory for YOLO (NN deck p30–59) |
+
+The full survey of the course material (including the options that were dropped) is in
+[ARCHIVE/COURSE_ALIGNMENT.md](ARCHIVE/COURSE_ALIGNMENT.md).
+
 | Area | Decision | Reason |
 |---|---|---|
 | YOLOv11-Seg apex detection | 🧊 Frozen. Keep as is; no retraining or generalisation to other tracks. | Already complete from last semester; DL work goes into the LSTM side instead. |
 | Racing-line search (A\*/Dijkstra/BFS) | 🧊 Frozen. No new features. | Classical search, not ML/DL. Only bug fixes that other work depends on are allowed. |
 | Big Data stack (Spark, HDFS, MongoDB, Big Data tab) | 🧊 Frozen. Keep as is. | Not needed for DSML/DL, but removing it is riskier than leaving it. |
-| Bug fixes | ✅ Done (Oct 2026), except #8/#9, which are finished by the Isolation Forest rework (§B), and #22, moved to the LSTM rework (§D). | The project must run end-to-end and match its documentation. |
-| Isolation Forest rework + Z-score baseline | ⏳ Committed (DSML). | Current features and tuning are flawed (see §2B). Z-score shows whether ML is needed at all. |
+| Bug fixes | ✅ Done (Oct 2026); #8/#9 finished by the Isolation Forest rework (§B); #22 moved to the LSTM rework (§D). | The project must run end-to-end and match its documentation. |
+| Isolation Forest rework + Z-score baseline | ✅ Done (DSML, Oct 2026). | The old features and tuning were flawed (see §2B). Z-score shows whether ML is needed at all. |
 | Ridge regression baseline for tyre/pace prediction | ⏳ Committed (DSML). | One classical baseline for the RNN/LSTM comparison. |
 | LSTM autoencoder for mistake detection | ⏳ Committed (DL). | Deep-learning counterpart to the Isolation Forest on the same data and test. |
 | Vanilla RNN vs LSTM for tyre/pace prediction | ⏳ Committed (DL). | Vanishing gradients and the RNN are taught in detail; LSTM is the taught remedy. |
 | Dashboard UI redesign | ⏳ Committed (last). | Frozen components move to separate, lazily loaded tabs; new slider, sidebar and chart types. See §2E. |
 | DL training-practice experiment (e.g. optimiser comparison) | 🤔 Optional — at most one, decided later. | Covers DL Units 1–2 without adding a new model. |
 | Longer input window (5 vs 10 laps) for RNN vs LSTM | 🤔 Optional. | With 5-lap inputs the RNN and LSTM are expected to score closely (vanishing gradients bite on long sequences); a longer window would show the difference. |
-| Driving-style clustering + PCA | ✖ Dropped (team decision). | Keep the project focused. |
-| Classification task (tyre compound / lap type) | ✖ Dropped (team decision). | Keep the project focused. |
-| One-Class SVM, KNN, DBSCAN, LOF anomaly detectors | ✖ Dropped (team decision). | Z-score + Isolation Forest + LSTM autoencoder tell the story with fewer methods. |
-| Random Forest / Gradient Boosting regression baselines | ✖ Dropped (team decision). | One baseline (Ridge) is enough. |
+| Driving-style clustering + PCA | ✖ Dropped (decision). | Keep the project focused. |
+| Classification task (tyre compound / lap type) | ✖ Dropped (decision). | Keep the project focused. |
+| One-Class SVM, KNN, DBSCAN, LOF anomaly detectors | ✖ Dropped (decision). | Z-score + Isolation Forest + LSTM autoencoder tell the story with fewer methods. |
+| Random Forest / Gradient Boosting regression baselines | ✖ Dropped (decision). | One baseline (Ridge) is enough. |
 | GRU / 1D-CNN / Transformer comparisons | ✖ Not planned. | RNN chosen instead of GRU (taught in detail). |
 
 ---
@@ -77,15 +90,15 @@ In total: 3 DSML methods (Z-score, Isolation Forest, Ridge) and 3 DL models (RNN
 | 5 | Cache dir inconsistency (`data_lake/cache` vs `cache/`); `scipy` missing from `requirements.txt` (also found: racing line had no cache set at all; `pillow` missing) | ✅ |
 | 6 | Dashboard sidebar footer credits only one team member | ⏸ Deferred by user — keep the footer as is; add the other members only when asked. |
 | 7 | Generate model outputs for more sessions/drivers so the dashboard isn't mostly empty | ⏸ Deferred — do after all model-related fixes and changes are finished. |
-| 8 | Stale integration tests: `test_pipeline_schema` (old grid / meta key) and `test_pipeline_correctness` (catches 1/11 injected anomalies) failed; `test_tyre_pipeline` ✅ (rewritten to run the real pipeline during bug 3). Both failing files were deleted in test audit round 2; the Isolation Forest rework (§B) writes their replacements. | ✅ (replacements in §B) |
-| 9 | Isolation Forest log line crashes the Windows console encoding (`→`) and prints 0.005 as "0.01" | 🔗 Encoding crash fixed project-wide (utils logger); the "0.01" log format is fixed in §B (`mistakes_model.py` is rewritten there). |
+| 8 | Stale integration tests: `test_pipeline_schema` (old grid / meta key) and `test_pipeline_correctness` (catches 1/11 injected anomalies) failed; `test_tyre_pipeline` ✅ (rewritten to run the real pipeline during bug 3). Both failing files were deleted in test audit round 2; the Isolation Forest rework (§B) writes their replacements. | ✅ Replaced in §B: `integration/test_mistakes_pipeline.py` runs the real pipeline on real data, including the planted-mistake check (phase 2). |
+| 9 | Isolation Forest log line crashes the Windows console encoding (`→`) and prints 0.005 as "0.01" | ✅ Encoding crash fixed project-wide (utils logger); contamination is logged with 3 decimals since §B phase 2. |
 | 10 | `frontend/app.py` uses `st.components.v1.html`, which Streamlit has deprecated (replace with `st.iframe`) | ✅ |
 | 10b | Follow-up to #10: `filter_mode=None` blocks typing but Backspace/Delete still cleared a dropdown's shown value (reported by user). Fixed with a key-lock script via the supported `st.html(..., unsafe_allow_javascript=True)`. | ✅ (needs a manual check in the browser) |
 | 11 | Test runner used a bare `python`, which on Windows ran the tests under the system interpreter instead of the venv (found while fixing #2) | ✅ |
 | 12 | CV turn windows were hand-typed for one Bahrain video (duplicated in the frontend) and `cv/extract_turns.py` (curvature detection) found only 11 of Bahrain's 15 corners. Now built from FastF1's official corner list + pole-lap telemetry; only a per-video `--video-offset` is manual. Validated on Bahrain 2024: 15/15 corners, apex times within 0.37 s on average of the hand annotation, direction 14/15. | ✅ |
 | 13 | LSTM training data includes out-laps, in-laps (pit stops) and safety-car laps with no filtering, so slow non-representative laps pollute both inputs and targets. Fix before retraining. | ✅ |
 | 14 | `predict_single_stint` silently overwrites each stint's first lap features with the second lap's (an undocumented workaround for out-laps); should be replaced by proper lap filtering (#13) | ✅ |
-| 15 | **Test-suite audit:** review every unit and integration test file and confirm each test exercises real project code and checks real behaviour (not re-implemented logic, trivial assertions, or outdated expectations). Bug #3 found an integration test that re-implemented the pipeline instead of testing it, so others may do the same. Findings: [TEST_AUDIT.md](TEST_AUDIT.md). | ✅ Round 1: all non-Isolation-Forest tests fixed. Rounds 2–3: only essential tests kept and no mock tests (252 → 145, all passing); old Isolation Forest tests (A3/A4/A20) deleted, replacements written in §B. No new tests for frozen YOLO/Big Data code (user decision). |
+| 15 | **Test-suite audit:** review every unit and integration test file and confirm each test exercises real project code and checks real behaviour (not re-implemented logic, trivial assertions, or outdated expectations). Bug #3 found an integration test that re-implemented the pipeline instead of testing it, so others may do the same. Findings: [ARCHIVE/TEST_AUDIT.md](ARCHIVE/TEST_AUDIT.md). | ✅ Round 1: all non-Isolation-Forest tests fixed. Rounds 2–3: only essential tests kept and no mock tests (252 → 145, all passing); old Isolation Forest tests (A3/A4/A20) deleted, replacements written in §B. No new tests for frozen YOLO/Big Data code (user decision). |
 | 16 | `cv/select_training_frames.py` never samples the end of a video (takes every `len//11`-th frame, then the first 11), contrary to the documented even spacing. Found by the test audit. | ✅ |
 | 17 | `racing_line_grid.find_start_end_nodes` uses a different grid origin (min X/Y of fast samples) from `build_grid` (min of all samples), shifting start cells. Found by the test audit. | ✅ |
 | — | **Pre-commit full review (Oct 2026)** — found by a fresh read of every script plus static analysis. Severity: H = wrong results/crash on real data, M = edge case/misleading, L = cleanup. All verified unless marked "(code)". | |
@@ -112,13 +125,16 @@ In total: 3 DSML methods (Z-score, Isolation Forest, Ridge) and 3 DL models (RNN
 | 38 | **L** Cleanup: unused imports/variables/f-strings (ruff), unused constants (`COLOR_*`, `ALGO_LABELS`, `STRAIGHT_THRESHOLD`), dead `_fetch_anomaly_distribution` + `mongo_manager.get_anomaly_score_distribution`; caches deleted. **Kept on purpose:** the switched-off optimal-line/ghost-car traces in `track_map.py` (may be used by the UI redesign), unused function arguments (signature changes ripple into callers), `MIN_POINTS_PER_CELL` (a tunable that is currently a no-op). | ✅ |
 | 39 | **H** Racing line "time saved" is not meaningful: path time = length ÷ mean speed of the cells it passes, with cell speeds averaged over the whole session (out-laps included), so A\* gains just by passing through fast cells. 2023 R1 Q #1: driver's lap estimated at 110.5 s (real 89.7 s), A\* "saves" ~9 s although its path is longer; clamped to 5.0 for all three algorithms. Found while fixing #18/#19 (the old clamp hid it). **Fix:** time = Σ segment length ÷ speed of the nearest fastest-lap sample (scipy cKDTree), applied identically to the driver's full-resolution lap and to each search path; clamp removed. Validated: driver's lap 88.76 s vs real 89.708 s (1 %). New result: A\*/Dijkstra −0.079 s, BFS −0.104 s (no faster line, within error). Rejected alternative: per-cell fastest-lap speeds (half the cells have no sample at 5 m resolution). | ✅ |
 | 40 | **M** Spark's numeric-column check compared `str(dtype)` with names like `"DoubleType"`, but PySpark 3.5 prints `"DoubleType()"`, so the forward-fill never ran (previously listed only in PROJECT_DOCUMENTATION §8). **Fix:** `isinstance` check; fixed together with #27's fill window. No data impact (raw data has no gaps). | ✅ |
-| — | Isolation Forest items found in this review are folded into §B: `speed_delta` per *sample* is inconsistent because sample spacing varies 0.014–0.76 s; `--reference` file is not column-validated; features computed twice. | 🔗 §B |
+| 41 | **L** MongoDB mistake leaderboard and session summary rank drivers by `mistake_rate_pct`, which is now ~2 % for every driver by construction (contamination fixed at 0.02 in the Isolation Forest rework, §B), so the ranking carries no information. Should rank by event count or total severity (`*_mistakes_events.json`). Found Oct 2026 in rework phase 5. | ⏳ Not fixed: frozen Big Data code; for the UI redesign (§E) / Big Data tab. |
+| 42 | **L** Streamlit printed \"Static file serving is enabled, but no static folder found\" at every start: `.streamlit/config.toml` had `enableStaticServing = true`, but nothing uses a `static/` folder (videos go to `st.video` by path). **Fix:** set to `false`; verified the app starts without the warning. | ✅ |
+| 43 | **L** AI tab Isolation Forest cards: the \"Flagged Samples (lap)\" label is cut off (\"...\") at normal widths, and the cards are unclear: \"Events (lap)\" and \"Mistake Rate\" are per selected lap (rate = flagged samples / samples in that lap, e.g. 2.38 %; ~2 % over the session by construction). Found 2026-10-31 by the user. | ⏳ For the UI redesign (§E). |
+| — | Isolation Forest items found in this review are folded into §B: `speed_delta` per *sample* is inconsistent because sample spacing varies 0.014–0.76 s; `--reference` file is not column-validated; features computed twice. | ✅ §B phase 1: acceleration over a fixed 0.5 s; `--reference` removed; features computed once. |
 
 **Bug fixes are project-wide:** "frozen" means no new features. Bugs are still fixed everywhere,
 including in the YOLO/CV, racing-line and Big Data code.
 
-### B. DSML — Isolation Forest rework + Z-score baseline (committed)
-Design: [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).
+### B. DSML — Isolation Forest rework + Z-score baseline ✅ (done Oct 2026)
+Everything about it: [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).
 - Features compared with the 5 fastest other drivers at the same track position (never the target driver).
 - Only representative laps (no pit, safety-car or start laps). Evidence from #33: stationary garage
   samples hold brake + throttle together (up to 94 % of a qualifying session's overlap samples), so
@@ -126,6 +142,20 @@ Design: [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).
 - Settings chosen with planted fake mistakes; evaluated with confusion matrix, precision, recall, F1.
 - Z-score baseline on the same features and test.
 - Flagged samples grouped into mistake events with a plain-language reason.
+- **Done:** all of the above, plus 0.5 s feature smoothing, last race lap excluded, contamination
+  fixed at 0.02 and max_samples = all rows (user decisions). Results: ISOLATION_FOREST_REWORK.md.
+- **User review (2026-10-31), done:** race samples with DRS open or < 1 s behind another car left
+  out (FastF1 `DRS` / `DistanceToDriverAhead`, read from the cache at run time); only flag runs of
+  ≥ 0.5 s are events; each event gets a corner location ("Approaching Turn 14") instead of a
+  position in metres; reasons in sentence case; flag rate stays 2 %. Mean F1 0.283 → 0.289,
+  events 232–291 → 27–31 per race (IF doc §11 phase 6).
+- **Done (2026-10-31):** planted test scored per mistake (per-sample scores dropped); time lost
+  per event vs the driver's own laps, events ranked by it; likely lift-and-coast / tyre saving
+  labelled; real-data check (costly share of events vs random spots) (IF doc §11 phase 7).
+- **Done (2026-11-01):** event merge gap 0.5 → 1 s (recall 0.22 → 0.27, F1 0.29 → 0.34); AI tab
+  lists all events, "(costly)" text removed (IF doc §11 phase 8).
+- **Not done (user, 2026-10-31):** a combined "both detectors agree" output. Z-score, Isolation
+  Forest and (in §D) the LSTM autoencoder are compared as three separate detectors.
 
 ### C. DSML — Ridge regression baseline (committed)
 - Same task and data split as the LSTM: predict next-lap pace from the previous 5 laps of a stint.
@@ -165,9 +195,13 @@ Design: [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).
   note also appears for races; the CV stat cards count frames, not corners; the AI tab's "Current
   Pace" is the stint's last lap, which is often the in-lap.
 - **Isolation Forest view:** the rework (§B) only adds the minimum needed to verify it (mistake
-  event list with reasons, event markers). Its proper design is done here.
+  event list with corner locations and reasons, event markers). Its proper design is done here,
+  including the three cards under the map (#43: truncated label; say per lap vs per session; a
+  per-lap "mistake rate" is ~2 % by construction, so show something more useful). Also: the Race Intelligence
+  track map's "Mistakes" mode still marks flagged samples (should use events), and the Big Data
+  tab's MongoDB leaderboard ranks by a mistake rate that is now ~2 % for everyone (#41).
 
-### F. Dropped (team decision, Oct 2026)
+### F. Dropped (decision, Oct 2026)
 Driving-style clustering + PCA; classification task; One-Class SVM / KNN / DBSCAN / LOF; Random
 Forest / Gradient Boosting baselines; GRU / 1D-CNN / Transformer comparisons.
 
@@ -182,10 +216,12 @@ These apply to everyone (and to AI assistants) working on the project.
   verified, and what was *not* verified.
 - After every code change, update the affected docs in the same piece of work: this file's status
   column, `PROJECT_DOCUMENTATION.md` (the method sections and §8 "Fixed" / "Known issues"),
-  `README.md`, `architecture.md` and any other doc that describes the changed behaviour.
-- Every bug discovered along the way is added to the table in §2A immediately (next number: #41),
+  `README.md`, `ISOLATION_FOREST_REWORK.md` (for mistake detection) and any other doc that
+  describes the changed behaviour. Keep the docs folder small: one main document, this roadmap,
+  and one document per reworked model; previous-semester files live in `docs/LAST_SEM/`.
+- Every bug discovered along the way is added to the table in §2A immediately (next number: #44),
   even if it isn't fixed straight away. The project is known to have undiscovered bugs.
-- Last semester's `.docx` / `.pdf` files in `docs/` are kept unchanged as historical record.
+- Last semester's `.docx` / `.pdf` files in `docs/LAST_SEM/` are kept unchanged as historical record.
 
 **Verification**
 - Prove fixes on real data where possible (run the pipeline on a real session and compare before
@@ -209,5 +245,5 @@ These apply to everyone (and to AI assistants) working on the project.
   the rewrite, not patched beforehand.
 
 **Scope**
-- The method list in §1 is final: no extra algorithms without a team decision.
+- The method list in §1 is final: no extra algorithms without a decision.
 - The real LSTM model is not retrained until the LSTM rework (§D).

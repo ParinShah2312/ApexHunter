@@ -104,6 +104,18 @@ Result: **145 tests** (23 unit files / 127 tests, 5 integration files / 18 tests
 none skipped. The integration tests need the local `data_lake/` and `cache/` and are skipped
 (not failed) without them.
 
+### After Isolation Forest rework phase 1 (October 2026)
+147 tests (127 unit, 20 integration in 6 files). Added `integration/test_mistakes_pipeline.py`
+(3 real-data tests); `test_pipeline_skip_force.py` rewritten on real data (3 tests); the single-row
+edge case removed (behaviour no longer exists); the unused `integration/conftest.py` deleted.
+
+After phase 2: 148 tests (one planted-mistake PR-AUC check added to `test_mistakes_pipeline.py`).
+After phase 3: 151 tests (new `unit/test_mistakes_events.py` with 2 tests; one events check added
+to `test_mistakes_pipeline.py`).
+After phase 4: 152 tests (one comparison check added to `test_mistakes_pipeline.py`, which now runs
+with `compare=True`).
+After phase 5: 153 tests (output-schema test added, replacing old A20). The rework is complete.
+
 ## 3. Untested code (coverage 0 %)
 
 Decision (user, Oct 2026): YOLO/CV inference and Big Data code are last semester's frozen work;

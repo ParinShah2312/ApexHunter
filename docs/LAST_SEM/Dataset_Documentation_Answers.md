@@ -1,7 +1,7 @@
 # Dataset Documentation — ApexHunter 2.0
 
 Answers to the sections of the *Dataset Documentation Template*, updated to match the current data.
-Team: Parin Shah (23001091), Ayush Parikh (23000936), Malav Joshi (23001119).
+Author: Parin Shah (23001091).
 
 ### 1. Basic dataset information
 - **Dataset name:** ApexHunter F1 Telemetry & Onboard Video Dataset

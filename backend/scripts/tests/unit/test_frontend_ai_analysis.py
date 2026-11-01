@@ -30,10 +30,12 @@ def _render_if_panel():
     df = pd.DataFrame({
         "X": np.arange(n, dtype=float), "Y": np.arange(n, dtype=float),
         "Speed": np.full(n, 200.0), "is_mistake": is_mistake,
-        "anomaly_score": np.zeros(n), "brake_intensity": np.zeros(n),
+        "anomaly_score": np.zeros(n),
     })
-    meta = {"best_contamination": 0.005, "reference_driver": "1"}
-    _render_isolation_forest_column(df, meta)
+    meta = {"best_contamination": 0.005, "reference_drivers": ["1", "11"]}
+    events = [{"rank": 1, "lap": 3, "track_pos_m": 520.0, "duration_s": 0.6, "speed_kmh": 280.0,
+               "x": 1.0, "y": 1.0, "location": "Turn 4", "time_lost_s": 0.18, "costly": True, "saving_note": "", "reason": "Off the throttle: 78 % less than the field"}]
+    _render_isolation_forest_column(df, meta, events)
 
 
 # Streamlit renders lap-time deltas with these colours (Metric proto enum: RED = 0, GREEN = 1)
@@ -92,7 +94,7 @@ class TestMistakeRate(unittest.TestCase):
         self.assertEqual(metrics["Mistake Rate"], "2.50%")       # 10 / 400
         self.assertNotEqual(metrics["Mistake Rate"], "0.005")    # the contamination setting
         caption = " ".join(c.value for c in at.caption)
-        self.assertIn("10 anomalies (2.50% of samples)", caption)
+        self.assertIn("1 events from 10 flagged samples (2.50% of samples)", caption)
 
 
 class TestStintLapAxis(unittest.TestCase):

@@ -4,11 +4,9 @@
 **Courses:** Data Science & Machine Learning · Deep Learning
 **Academic Year:** 2026–2027
 
-| Sr. No. | Enrolment Number | Student Name |
-|---|---|---|
-| 1 | 23001091 | Parin Shah |
-| 2 | 23000936 | Ayush Parikh |
-| 3 | 23001119 | Malav Joshi |
+| Enrolment Number | Student Name |
+|---|---|
+| 23001091 | Parin Shah |
 
 > **Project history.** The first version of ApexHunter 2.0 was built in the previous semester
 > (Jan–May 2026) for the *Artificial Intelligence* and *Big Data* courses. This semester the same
@@ -47,7 +45,7 @@ presents the results:
 
 | Component | Technique | Course | Question it answers |
 |---|---|---|---|
-| Driver mistake detection | Isolation Forest (unsupervised anomaly detection) | DSML | Where in a session did the driver deviate from normal driving? |
+| Driver mistake detection | Isolation Forest (unsupervised anomaly detection) vs a Z-score baseline, on deviations from the field at the same track position | DSML | Where in a session did the driver drive differently from the fastest other drivers? |
 | Racing-line search | A\*, Dijkstra, BFS on a telemetry-weighted grid | DSML (optimisation / search) | What is the lowest-cost path through the driver's own telemetry footprint? |
 | Tyre cliff prediction | Stacked LSTM with Monte Carlo dropout | Deep Learning | When does pace drop off within a tyre stint? |
 | Apex detection | YOLOv11-Seg instance segmentation (transfer learning) | Deep Learning | How close does the car come to the apex curb at each corner? |
@@ -117,17 +115,18 @@ backend/
     bigdata/                  hdfs_manager, spark_clean_telemetry, mongo_manager
     cv/                       extract_frames, select_training_frames, extract_turns,
                               run_inference, inference_geometry/masking/hud/io
-    isolation_forest/         mistakes_features, mistakes_model, mistakes_io
+    isolation_forest/         mistakes_features, mistakes_model, mistakes_eval, mistakes_events, mistakes_timeloss, mistakes_io
     lstm/                     tyre_data, tyre_model, tyre_io
     racing_line/              racing_line_grid, racing_line_search, racing_line_io
-    tests/                    unit/ (23 files), integration/ (5 files), run_tests.py
+    tests/                    unit/ (24 files), integration/ (6 files), run_tests.py
 frontend/
   app.py, config.py
   components/                 sidebar, data_loader, header_bar, telemetry_charts, track_map,
                               cv_feed, ai_analysis, racing_line, bigdata_tab, bigdata_charts, scrubber
 models/                       best.pt (YOLO), tyre_lstm.pt, tyre_scaler.pkl, tyre_config.json
 data_lake/                    all data and model outputs (gitignored)
-docs/                         this document and supporting reports
+docs/                         this document, ROADMAP.md, ISOLATION_FOREST_REWORK.md;
+                              LAST_SEM/ (previous-semester files), ARCHIVE/ (merged docs)
 ```
 
 ---
@@ -185,7 +184,7 @@ They are stored in `data_lake/raw_images/satellite_maps/` but the dashboard does
 |---|---|---|
 | Missing values | Occasional NaN sensor packets | Rows with Speed, RPM, X and Y all missing are dropped; other gaps are forward-filled. In practice no rows were dropped (57,874,119 in = out). |
 | Outliers | Throttle values up to 104 % appear in raw data | Clipping: Speed 0–380, RPM 0–15,000, Throttle 0–100, Brake 0–1 |
-| Binary brake | `Brake` carries no pressure information | Treated as an on/off flag everywhere: a braking feature for the Isolation Forest, a fraction of braking samples per cell for the racing line, and fraction of the lap spent braking for the LSTM |
+| Binary brake | `Brake` carries no pressure information | Treated as an on/off flag everywhere: compared with the field's brake-on share for the Isolation Forest, a fraction of braking samples per cell for the racing line, and fraction of the lap spent braking for the LSTM |
 | GPS noise | X/Y jitter, especially at low speed | Not filtered |
 | Imbalance | Races have ~2× the rows of qualifying sessions; DNFs truncate data | Models process each session independently |
 | Selection bias | Onboard videos exist only for the pole sitter, which favours front-running teams | Acknowledged; CV results are per-lap case studies |
@@ -207,6 +206,11 @@ file already exists are skipped. API responses are cached in `cache/`. At the en
 logs a count per outcome (saved, skipped, empty, partial, failed), lists any failed or partial
 sessions, and exits with code 1 if there were any. A *partial* file (some drivers failed to load)
 is still saved; delete it and re-run to retry those drivers.
+
+Videos are downloaded with yt-dlp into `downloaded_videos/{year}/` by
+`etl/download_manual_videos.py`, one batch at a time (`manual_downloads` in `config.json` holds a
+year and name → URL pairs; the config keeps the last batch), and trimmed by hand into
+`edited_videos/`. Satellite images come from `etl/download_satellite_images.py`.
 
 ## 4.2 Transform — `etl/clean_telemetry.py` (pandas)
 
@@ -272,77 +276,34 @@ EDA lives in the dashboard (Telemetry and Big Data tabs):
   the brake on and throttle > 5 %; slower samples are excluded because in the garage, pit box or
   on the grid both pedals are often held on purpose).
 
-## 5.2 Driver mistake detection — Isolation Forest
+## 5.2 Driver mistake detection — Isolation Forest (vs Z-score baseline)
 
-**Files:** `detect_mistakes.py`, `isolation_forest/mistakes_features.py`, `mistakes_model.py`,
-`mistakes_io.py`
+**Full write-up (method, evaluation, results, outputs, tests, decisions, history):
+[ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).** Summary:
 
-> **Status:** this section describes the current (last-semester) method, which has known flaws
-> (§8 #3). It is being replaced by the rework designed in
-> [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md); this section is rewritten when the
-> rework lands.
+- **Question asked of every sample:** is the driver doing something unusual compared with what the
+  5 fastest other drivers do at the same point on track? Representative laps only; each sample is
+  projected onto the session's fastest lap; 5 features = deviations from the field's median per
+  10 m (speed, throttle, brake-on share, gear, acceleration), scaled by the field's spread and
+  smoothed over 0.5 s. In races, samples with DRS open or < 1 s behind another car are left out
+  (DRS and the gap come from FastF1's telemetry).
+- **Model:** Isolation Forest (200 trees, all rows per tree) on the driver's own laps; the 2 %
+  most anomalous samples are flagged; flag runs (flags < 1 s apart) of at least 0.5 s become **events** with a corner
+  location ("Approaching Turn 14"), a plain-language reason and the **time lost** vs the driver's
+  own nearby laps (32–40 events per race, ranked by time lost; likely lift-and-coast / tyre
+  saving is labelled and ranked last).
+- **Evaluation:** (1) fake mistakes planted in held-out laps (lock-up, early lift, late throttle,
+  pedal overlap, missed downshift), scored per mistake: precision 0.43–0.55, recall 0.24–0.31,
+  F1 0.32–0.38 on 4 sessions; (2) real-data check: in both Bahrain races 15–19 % of events cost
+  clear time vs 10–12 % of random spots (not at Monaco).
+- **Z-score baseline** on the same features and checks: mean F1 0.284 vs Isolation Forest 0.343
+  (Z-score has higher precision, Isolation Forest higher recall); Isolation Forest is better on
+  lock-ups and missed downshifts, Z-score on early lifts.
+- **Limitation:** only ~1 in 4 planted mistakes is found, and some events are different from the
+  field without costing time (driving style, a different line).
 
-### Idea
-Isolation Forest is an unsupervised anomaly detector. It builds random trees that split on random
-features at random thresholds. Points that are isolated after few splits (short average path length)
-are anomalous. The model learns "normal driving" from the target driver together with a reference
-driver, then flags the target driver's samples that are hard to explain as normal.
-
-### Feature engineering (7 features, all float32)
-
-| Feature | Formula | Captures |
-|---|---|---|
-| `speed_normalized` | Speed / 380 | Absolute pace |
-| `throttle_intensity` | Throttle / 100 | Throttle application |
-| `brake_intensity` | 1 if brake on, else 0 | Braking (FastF1 has no brake pressure, so this is the on/off flag) |
-| `brake_throttle_overlap` | 1 if brake on and Throttle > 5 % | Simultaneous pedal use, a sign of lock-ups, instability or poor technique |
-| `speed_delta` | ΔSpeed clipped to ±50 | Sudden acceleration/deceleration |
-| `gear_change` | \|ΔnGear\| clipped to 0–4 | Gear skips |
-| `rpm_normalized` | RPM / 15,000 | Engine load |
-
-> **Note:** FastF1's `Brake` is binary, so `brake_intensity` is the on/off flag itself rather than
-> a normalised pressure. Before October 2026 the code divided it by 100 and used a `> 5` threshold,
-> which made both brake features carry no signal. That bug is fixed.
-
-### Training procedure
-
-1. Load the clean session; check that `Driver, Speed, RPM, Throttle, Brake, X, Y, SessionTime, nGear` exist.
-2. Choose the **reference driver** = highest mean speed in the session (or in a separate `--reference` file).
-3. Engineer features for the target and reference drivers and concatenate them as the training set.
-4. **Contamination grid search with 5-fold CV:** contamination ∈ {0.005, 0.01, 0.015, 0.02, 0.03, 0.05};
-   KFold(5, shuffle, seed 42); each fold is scored by the mean |decision_function| on the held-out fold.
-   The highest-scoring value is selected (6 × 5 = 30 fits, 200 trees each).
-5. Fit the final `IsolationForest(n_estimators=200, max_samples="auto", random_state=42)` on all training rows.
-6. Score the **target driver only**: `anomaly_score = decision_function`, `is_mistake = predict == -1`.
-
-### Outputs
-- `data_lake/mistake_data/{session}_{driver}_mistakes.parquet` contains the original telemetry plus
-  `anomaly_score`, `is_mistake` and the 7 features.
-- `..._mistakes_meta.json` holds the session, driver, reference driver, best contamination, CV
-  score per contamination value, total rows and mistakes, mistake rate, tree count, feature list and
-  timestamp.
-
-### Current results (2023 Bahrain GP race, driver #1)
-
-| Metric | Value |
-|---|---|
-| Rows scored | 42,381 |
-| Rows with brake on / brake + throttle overlap | 8,556 (20.2 %) / 65 |
-| Flagged samples | 212 (0.50 %) |
-| Flagged samples under braking / with pedal overlap | 201 / 5 |
-| Selected contamination | 0.005 |
-| Reference driver | #1 (Verstappen was also the fastest by mean speed, so the baseline is his own) |
-| CV scores | 0.005 → 0.196, 0.01 → 0.171, 0.015 → 0.154, 0.02 → 0.145, 0.03 → 0.133, 0.05 → 0.116 |
-
-The CV score falls steadily as contamination grows. Mean |decision_function| shrinks as the
-threshold moves into the bulk of the data, so this criterion will always favour the smallest
-value in the grid. It is not a real model-selection signal (see §8). Now that the brake features
-carry information, 95 % of flagged samples are braking samples: the model treats braking itself as
-unusual. This is a target for the planned Isolation Forest improvements.
-
-### Usage
 ```bash
-python backend/scripts/detect_mistakes.py --session data_lake/clean_data/2023_1_R.parquet --driver 1 [--reference <file>] [--output-dir <dir>] [--force]
+python backend/scripts/detect_mistakes.py --session data_lake/clean_data/2023_1_R.parquet --driver 1 [--force] [--compare]
 ```
 
 ## 5.3 Racing-line search — A\*, Dijkstra, BFS
@@ -625,7 +586,7 @@ python backend/scripts/cv/run_inference.py --input "data_lake/edited_videos/2024
 | Header | Track name, fastest lap (FastF1), top speed, driver number/name/team |
 | 🏎 Race Intelligence | Master session-time scrubber (linked to the Telemetry-tab slider: moving either moves both, and every tab uses that time); processed CV video with an apex-status badge that follows the scrubber while it is inside the video's lap (select that session and driver; otherwise it shows "Not in this lap"), status counts and a turn-by-turn report card; track map in Speed or Mistakes mode with a lap selector |
 | 📊 Telemetry | Speed/Throttle/Brake (on/off)/Gear/RPM subplots with a scrubber line; top speed and brake-overlap % (brake on and throttle > 5 %, counted over samples at ≥ 50 km/h) |
-| 🧠 AI Analysis | Isolation Forest track map with mistake markers per lap, plus anomalies, mistakes under braking and measured mistake rate for the selected lap; LSTM stint chart with predicted pace, confidence band and cliff marker |
+| 🧠 AI Analysis | Isolation Forest track map with one marker per mistake event of the selected lap, event and flagged-sample counts and mistake rate for the lap, and all events with location, time lost and reason; LSTM stint chart with predicted pace, confidence band and cliff marker |
 | 🛣 Racing Line | Track outline with the driver's fastest lap and the selected algorithm's path; deviation per turn |
 | 🗄️ Big Data | Pipeline DAG, HDFS and Spark statistics from the JSON logs, EDA charts for the selected session, LSTM and pathfinding summaries, live MongoDB leaderboard |
 
@@ -637,21 +598,45 @@ This section is kept up to date as fixes are made. Which issues will be fixed, a
 is decided in [ROADMAP.md](ROADMAP.md).
 
 ### Progress and next steps (Oct 2026)
-1. **Bug fixes: done.** All bugs found in the code review (ROADMAP #1–#40) are fixed, except the two
-   that belong to planned reworks (Isolation Forest #8/#9, LSTM features #22).
-2. **Test audit rounds 2–3: done** (only essential tests, no mocks; 145 tests, all passing).
-   **Next: the Isolation Forest rework + Z-score baseline** (DSML).
-3. Then the Ridge baseline (DSML), the LSTM rework with vanilla RNN vs LSTM and the LSTM
+1. **Bug fixes: done.** All bugs found in the code review (ROADMAP #1–#40) are fixed (#8/#9 by
+   the Isolation Forest rework), except LSTM features #22 (LSTM rework). #41 (MongoDB leaderboard)
+   is logged for the UI redesign.
+2. **Test audit rounds 2–3: done** (only essential tests, no mocks).
+3. **Isolation Forest rework + Z-score baseline: done** (Oct 2026; §5.2). Awaiting the user's
+   review before the next step.
+4. Then the Ridge baseline (DSML), the LSTM rework with vanilla RNN vs LSTM and the LSTM
    autoencoder (DL), outputs for more sessions, and finally the dashboard redesign.
 The step-by-step plan and the rules for working on the project are in ROADMAP §0 and §3.
 
 ### Working
 - Telemetry download and cleaning for all 92 sessions; Spark, HDFS and MongoDB integration (last run May 2026).
-- Isolation Forest, racing-line and CV inference pipelines run end to end.
+- Isolation Forest (with `--compare` for the Z-score baseline), racing-line and CV inference pipelines run end to end.
 - Dashboard with all five tabs.
-- Test suite: 145 tests, all passing (127 unit + 18 integration); no mock tests (test audit rounds 2–3).
+- Test suite: 159 tests, all passing (133 unit + 26 integration); no mock tests.
 
 ### Fixed
+- **Oct 2026 – Isolation Forest rework (5 phases).** The model compared absolute values per
+  sample, so ordinary braking looked unusual (95 % of flags were braking samples); contamination
+  was chosen by a criterion that always picks the smallest value (#8) and logged wrongly (#9); the
+  reference driver could be the target; pit/SC/lap-1 laps were included; output was scattered
+  dots. Now: deviations from the field at the same track position, settings chosen with planted
+  fake mistakes, ranked events with reasons, and a Z-score baseline. Details and the history of
+  each phase: [ISOLATION_FOREST_REWORK.md](ISOLATION_FOREST_REWORK.md).
+- **2026-10-31 – Isolation Forest review changes.** Slipstream/DRS samples were among the top
+  "mistakes" and every 1-sample flag was an event (232–291 per race), listed by an unreadable
+  position in metres. Now: race samples with DRS open or < 1 s behind a car are left out (from
+  FastF1's `DRS` and `DistanceToDriverAhead`); only flag runs of ≥ 0.5 s are events (27–31 per
+  race); each event has a corner location; reasons start with a capital letter. Mean F1 on the
+  planted test 0.283 → 0.289 (ISOLATION_FOREST_REWORK.md §11 phase 6).
+- **2026-10-31 – Per-mistake scoring and time lost.** The planted test scored samples, so a
+  lock-up counted as several hits and misses; it now counts each mistake once (precision, recall,
+  F1 per mistake; per-sample scores dropped). Each event gets its time lost vs the driver's own
+  nearby laps; events are ranked by it; repeated coasting is labelled likely saving; a real-data
+  check compares the costly share of events with random spots (§11 phase 7).
+- **2026-11-01 – Wider event merge gap.** One planted mistake was often flagged in pieces too
+  short to be an event; flags < 1 s apart (was 0.5 s) now form one event. Mean planted-mistake
+  recall 0.22 → 0.27, F1 0.29 → 0.34. The AI tab table lists all events and no longer shows
+  "(costly)" (§11 phase 8).
 - **Oct 2026 – Binary brake handling.** `Brake` is now treated as an on/off flag across cleaning
   (pandas and Spark clip 0–1), Isolation Forest features, racing-line node cost and the dashboard.
   The Telemetry tab shows "Brake (on/off)" as a step line, brake overlap means brake on and
@@ -691,7 +676,7 @@ The step-by-step plan and the rules for working on the project are in ROADMAP §
   were replaced by windows built from FastF1's official corner list and the pole lap's telemetry,
   plus a per-video offset. The dashboard report card reads the same saved windows.
 - **Oct 2026 – Test-suite audit (step 1).** Weak, stale, circular and duplicate tests were fixed,
-  merged or removed (249 → 230 tests, each checking real behaviour; details in `docs/TEST_AUDIT.md`).
+  merged or removed (249 → 230 tests, each checking real behaviour; details in `docs/ARCHIVE/TEST_AUDIT.md`).
   Bugs found on the way: training-frame selection never sampled the end of a video (now evenly
   spaced incl. first and last frame); racing-line start cells used a different grid origin from the
   grid; log lines with `→` were dropped on redirected Windows output (fixed for all scripts in
@@ -815,7 +800,7 @@ The step-by-step plan and the rules for working on the project are in ROADMAP §
   redesign (ROADMAP §E).
 - **Oct 2026 – Test audit round 2.** Only tests that guard real behaviour of main features were
   kept (252 → 168 tests). The old Isolation Forest tests, including the two failing integration
-  files, were deleted; the rework writes their replacements. See `docs/TEST_AUDIT.md`.
+  files, were deleted; the rework writes their replacements. See `docs/ARCHIVE/TEST_AUDIT.md`.
 - **Oct 2026 – Test audit round 3 (no mocks).** The 12 mock-based tests were removed or replaced.
   The racing-line and LSTM integration tests now run the real pipelines on real data (2023 Bahrain
   qualifying; 2024 races 1–4 with real FastF1 laps), checking real values such as Verstappen's lap
@@ -828,22 +813,27 @@ The step-by-step plan and the rules for working on the project are in ROADMAP §
 | # | Area | Issue |
 |---|---|---|
 | 2 | LSTM | The saved model predates the current 9-feature pipeline, so `predict_cliff.py` refuses to load it until it is retrained (deliberately deferred until other LSTM work is done). |
-| 3 | Isolation Forest | The CV criterion always selects the smallest contamination. The reference driver can be the target driver. |
+| 3 | Isolation Forest | Only ~1 in 4 planted mistakes is found (many are flagged for < 0.5 s, which is not an event). Some events differ from the field without costing time (driving style, a different line); at Monaco the events cost time no more often than random spots (§5.2). The MongoDB leaderboard ranks by a mistake rate that is ~2 % for everyone (#41). |
 | 4 | CV | The video list is not filtered by the selected session (the live status badge only follows the scrubber for the video's own session and driver). YOLO training metrics are not in the repo. |
 | 5 | Racing line | The search graph only contains cells the driver drove and its node cost is not a lap-time model, so it cannot find a faster line (estimated time saved ≈ −0.1 s, within the 1 % error of the time estimate). "Per-corner" deviation uses equal segments. Turn labels in the frontend are Bahrain-specific. The grid is built from all of the driver's session laps. |
 | 6 | Outputs | Model outputs exist for only one session/driver each (mistakes and tyre: 2023 R1 race #1; racing line: 2023 R1 qualifying #1; CV: Bahrain pole lap). |
 | 9 | Misc | `Time` is synthesised from the row index. Satellite images are unused. Team mapping is not season-specific. |
-| 11 | Logging | The Isolation Forest grid-search log prints contamination with 2 decimals, so 0.005 shows as "0.01" (the Windows encoding crash on `→` is fixed). |
 | 14 | Review (Oct 2026) | A full pre-commit review found further issues, logged as roadmap #18–#40. All are fixed except #22, which moved to the LSTM rework; a few dashboard presentation items from #37 moved to the UI redesign. |
 
 ---
 
 # 9. Testing
 
+Rules (ROADMAP §3): every test calls the real project code and would fail on a realistic
+regression; **no mock tests** (integration tests use real data from `data_lake/` and the FastF1
+`cache/`, and are skipped when it is absent); at most one regression test per fix; no new tests
+for frozen code. A 2026 audit applied these rules (252 → 145 tests, then 159 after the Isolation
+Forest rework).
+
 | Suite | Files | Tests | Notes |
 |---|---|---|---|
-| Unit | 23 | 127 | Frame selection, CV geometry/classification/turn windows, racing-line grid/search/I/O (incl. cost-aware detours and the time estimate), LSTM data/lap filtering/prediction windows/training/model/I/O (incl. a learnability check), telemetry cleaning, dashboard (AI tab, dropdowns, linked scrubbers, brake-overlap card, CV badge time mapping), project guards (script entry points, FastF1 cache, requirements, logging, UTF-8 file handling). All pass. Isolation Forest tests are being rewritten with the rework. Audit: `docs/TEST_AUDIT.md`. |
-| Integration | 5 | 18 | Real data, no mocks: racing line on 2023 Bahrain qualifying (fastest lap, scale, time estimate, A\* = Dijkstra), LSTM train → predict on real 2024 races 1–4 with real FastF1 laps, FastF1 turn windows vs the hand-annotated Bahrain 2024 lap, Isolation Forest pipeline edge cases and skip/force. Run with `--all`; skipped if `data_lake/` or `cache/` is absent. All pass. |
+| Unit | 24 | 129 | Frame selection, CV geometry/classification/turn windows, racing-line grid/search/I/O (incl. cost-aware detours and the time estimate), Isolation Forest events (flags merge into events, ranking, reasons), LSTM data/lap filtering/prediction windows/training/model/I/O (incl. a learnability check), telemetry cleaning, dashboard (AI tab, dropdowns, linked scrubbers, brake-overlap card, CV badge time mapping), project guards (script entry points, FastF1 cache, requirements, logging, UTF-8 file handling). All pass. Audit history: `docs/ARCHIVE/TEST_AUDIT.md`. |
+| Integration | 6 | 24 | Real data, no mocks: racing line on 2023 Bahrain qualifying (fastest lap, scale, time estimate, A\* = Dijkstra), LSTM train → predict on real 2024 races 1–4 with real FastF1 laps, FastF1 turn windows vs the hand-annotated Bahrain 2024 lap, Isolation Forest on the 2023 Bahrain race (#44: 5 other reference drivers, representative laps only, braking < 60 % of flags, planted-mistake PR-AUC > 4× chance, every flag in exactly one event, events ranked by severity, Z-score vs IF on the same planted test and flag rate, output schema read by the dashboard and MongoDB) and on 2024 Bahrain qualifying (skip/force/output folder), input edge cases. Run with `--all`; skipped if `data_lake/` or `cache/` is absent. All pass. |
 
 ```bash
 python backend/scripts/tests/run_tests.py          # unit tests

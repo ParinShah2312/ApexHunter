@@ -5,11 +5,9 @@
 
 ## Project Group Details
 
-| Sr. No. | Enrolment Number | Student Name |
-| :--- | :--- | :--- |
-| 1 | 23001091 | Parin Shah |
-| 2 | 23000936 | Ayush Parikh |
-| 3 | 23001119 | Malav Joshi |
+| Enrolment Number | Student Name |
+| :--- | :--- |
+| 23001091 | Parin Shah |
 
 *Based on the nature of data (alphanumeric tabular, text, images or videos) you may choose appropriate techniques.*
 
@@ -20,7 +18,7 @@
   annotated with segmentation masks.
 
 > The previous semester's version of this document (AI & Big Data) is preserved in
-> `docs/32_Ayush_Parin_AI_Prj_Specs.pdf/.docx`.
+> `docs/LAST_SEM/` (AI project specification, .pdf/.docx).
 
 ---
 

@@ -1,5 +1,5 @@
 [server]
-# Allow Streamlit to serve files from the static/ directory
-enableStaticServing = true
+# No static/ folder is used (videos are passed to st.video directly); serving it only printed a warning
+enableStaticServing = false
 # Increase max message size to 300 MB for video streaming
 maxMessageSize = 300

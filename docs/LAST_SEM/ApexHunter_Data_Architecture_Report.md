@@ -1,6 +1,6 @@
 # ApexHunter 2.0: Data Architecture & Warehousing Analysis Report
 
-*Team: Parin Shah (23001091), Ayush Parikh (23000936), Malav Joshi (23001119). Updated October 2026 to reflect the current codebase.*
+*Author: Parin Shah (23001091). Previous-semester (Big Data) report, updated October 2026 to reflect the current codebase.*
 
 ## Executive Summary
 This report provides a comprehensive breakdown of the current data structures, collection mechanisms, and storage architectures within the ApexHunter 2.0 codebase. It outlines exactly what telemetry and computer vision data is currently being ingested, identifies critical missing data points, and proposes a strategic architectural shift to transition from the current flat-file Data Lake into a highly scalable, "Massive Analytical Data Warehouse."
@@ -26,10 +26,11 @@ Aggregated on a per-lap basis for Stint detection and LSTM model training.
 *   **Lap Meta**: `race_lap_number` (Int), `lap_time_seconds` (Float). The LSTM target is the next lap's `mean_speed`; `cliff_lap` is derived from predictions.
 
 ### C. Machine Learning: Mistake Detection (Isolation Forest)
-Engineered features calculated row-by-row to detect micro-mistakes.
-*   **Normalized Features**: `speed_normalized`, `throttle_intensity`, `brake_intensity` (binary brake flag), `rpm_normalized`.
-*   **Complex Interactions**: `brake_throttle_overlap` (brake on and throttle > 5%), `speed_delta` (Row-to-row change), `gear_change`.
-*   **Outputs**: `anomaly_score` (Float32), `is_mistake` (Boolean).
+Each sample of the driver's representative laps is compared with the 5 fastest other drivers at the same track position (reworked Oct 2026, see ISOLATION_FOREST_REWORK.md); a Z-score baseline is compared on the same features.
+*   **Position**: `LapNumber`, `track_pos` (metres along the session's fastest lap).
+*   **Model features** (deviation from the field, in units of the field's spread, smoothed over 0.5 s): `speed_deficit`, `throttle_diff`, `brake_mismatch`, `gear_diff`, `accel_diff`.
+*   **Info columns**: `brake_throttle_overlap`, `speed_vs_field_kmh`, `throttle_vs_field_pct`, `gear_vs_field`, `field_brake_share`.
+*   **Outputs**: `anomaly_score` (Float32), `is_mistake` (Boolean), `event_id`; events JSON with rank, lap, time, track position, duration, severity and a plain-language reason.
 
 ### D. Pathfinding: Racing Line Grid Graph
 Aggregated grid nodes converting X/Y telemetry into a 2D weighted graph.

@@ -139,28 +139,39 @@ def mistake_rate_pct(df: pd.DataFrame) -> float:
     return float(df["is_mistake"].sum()) / len(df) * 100
 
 
-def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: Optional[dict]) -> None:
-    """Render the full Isolation Forest card including map, stats, and CV scores."""
+def _time_lost_text(event: dict) -> str:
+    """'+0.18 s' (time lost vs the driver's own nearby laps), or 'n/a'."""
+    lost = event.get("time_lost_s")
+    return "n/a" if lost is None else f"{lost:+.2f} s"
+
+
+def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: Optional[dict],
+                                    events: Optional[List[dict]] = None) -> None:
+    """Render the Isolation Forest card: track map with one marker per mistake event, counts,
+    and all events with their reasons, most costly first. Minimal version to check the rework; the
+    full design comes with the UI redesign (ROADMAP §E)."""
     if df_mistakes is None or meta is None:
         st.warning(
             "No Isolation Forest output found for this session and driver.\n\n"
             "Run: `python backend/scripts/detect_mistakes.py --session <path> --driver <code>`"
         )
         return
+    events = events or []
 
     contamination = meta["best_contamination"]
     total_mistakes = int(df_mistakes["is_mistake"].sum())
     session_rate = mistake_rate_pct(df_mistakes)
-    ref_name = DRIVER_MAPPING.get(meta["reference_driver"], meta["reference_driver"])
+    ref_names = ", ".join(DRIVER_MAPPING.get(d, d) for d in meta["reference_drivers"])
 
     st.markdown("**ISOLATION FOREST · Mistake Detection**")
     st.caption(
-        f"Session: {total_mistakes} anomalies ({session_rate:.2f}% of samples) · "
-        f"contamination setting={contamination:.3f} · ref: {ref_name}"
+        f"Session: {len(events)} events from {total_mistakes} flagged samples "
+        f"({session_rate:.2f}% of samples) · contamination setting={contamination:.3f} · "
+        f"field reference: {ref_names}"
     )
 
-    # Lap selector — filter mistakes to a single lap
-    df_display = df_mistakes
+    # Lap selector — filter events to a single lap
+    df_display, lap_events = df_mistakes, events
     if "LapNumber" in df_mistakes.columns:
         available_laps = sorted(df_mistakes[df_mistakes["LapNumber"] > 0]["LapNumber"].unique())
         if available_laps:
@@ -170,42 +181,28 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
             )
             selected_lap = available_laps[lap_options.index(selected_lap_label)]
             df_display = df_mistakes[df_mistakes["LapNumber"] == selected_lap]
+            lap_events = [e for e in events if e["lap"] == selected_lap]
 
-    # Track map — full track background in neutral blue
+    # Track map — full track background in neutral blue, one marker per event of the selected lap
     fig_map = go.Figure()
     df_map = downsample(df_mistakes, max_points=8000)
-
     fig_map.add_trace(
         go.Scattergl(
-            x=df_map["X"],
-            y=df_map["Y"],
-            mode="markers",
-            marker=dict(
-                color="#3abdc7",
-                size=3,
-                opacity=0.5,
-            ),
-            showlegend=False,
-            hovertemplate="X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
+            x=df_map["X"], y=df_map["Y"], mode="markers",
+            marker=dict(color="#3abdc7", size=3, opacity=0.5),
+            showlegend=False, hovertemplate="X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
         )
     )
-
-    # Mistake markers — only from the selected lap
-    df_m = df_display[df_display["is_mistake"] == True]
-    if not df_m.empty:
+    if lap_events:
         fig_map.add_trace(
             go.Scatter(
-                x=df_m["X"],
-                y=df_m["Y"],
-                mode="markers",
-                marker=dict(symbol="x", size=10, color="#ff3a3a"),
-                name="Mistake",
-                customdata=df_m["anomaly_score"].values,
-                text=df_m["Speed"].astype(str).values,
-                hovertemplate="MISTAKE · score: %{customdata:.3f}<br>Speed: %{text}<extra></extra>",
+                x=[e["x"] for e in lap_events], y=[e["y"] for e in lap_events], mode="markers",
+                marker=dict(symbol="x", size=10, color="#ff3a3a"), name="Mistake event",
+                text=[f"#{e['rank']} · {e.get('location', '')} · {e['reason']} · {_time_lost_text(e)}"
+                      for e in lap_events],
+                hovertemplate="%{text}<extra></extra>",
             )
         )
-
     fig_map.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#0d1520",
@@ -219,17 +216,29 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
 
     s1, s2, s3 = st.columns(3)
     with s1:
-        lap_mistakes = int(df_display["is_mistake"].sum())
-        st.metric("Anomalies", str(lap_mistakes))
+        st.metric("Events (lap)", str(len(lap_events)))
     with s2:
-        brake_override = int(
-            (df_display["is_mistake"] & (df_display["brake_intensity"] > 0.5)).sum()
-        )
-        st.metric("Under Braking", str(brake_override))
+        st.metric("Flagged Samples (lap)", str(int(df_display["is_mistake"].sum())))
     with s3:
         st.metric("Mistake Rate", f"{mistake_rate_pct(df_display):.2f}%")
 
-
+    if events:
+        st.markdown(f"**All {len(events)} events, most costly first "
+                    f"(time lost vs the driver's own nearby laps)**")
+        top = pd.DataFrame(events)
+        if "location" not in top.columns:                   # outputs from before the corner labels
+            top["location"] = top["track_pos_m"].map(lambda m: f"{m:.0f} m into the lap")
+        top["time_lost"] = [_time_lost_text(e) for e in events]
+        top["why"] = [e["reason"] + (f" ({e['saving_note']})" if e.get("saving_note") else "")
+                      for e in events]
+        st.dataframe(
+            top[["rank", "lap", "location", "time_lost", "why"]].rename(columns={
+                "rank": "#", "lap": "Lap", "location": "Location", "time_lost": "Time lost",
+                "why": "Why it was flagged"}),
+            hide_index=True, width="stretch",
+        )
+    else:
+        st.info("No event list for this output. Re-run detect_mistakes.py with --force.")
 
 
 def _render_lstm_column(tyre_data: Optional[dict]) -> None:
@@ -327,12 +336,13 @@ def render_ai_analysis(
     df_session: pd.DataFrame,
     scrub_seconds: float,
     tyre_data: Optional[dict] = None,
+    mistake_events: Optional[dict] = None,
 ) -> None:
     """Renders the AI Analysis tab content."""
     col_left, col_right = st.columns(2)
 
     with col_left:
-        _render_isolation_forest_column(df_mistakes, meta)
+        _render_isolation_forest_column(df_mistakes, meta, (mistake_events or {}).get("events"))
 
     with col_right:
         _render_lstm_column(tyre_data)

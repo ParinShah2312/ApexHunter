@@ -37,7 +37,7 @@ the 506 frames used for annotation.
 ## 3. Model
 | Stage | Entry point | Output |
 |---|---|---|
-| Isolation Forest (DSML) | `detect_mistakes.py` | `mistake_data/*_mistakes.parquet` + `_meta.json` |
+| Isolation Forest (DSML) | `detect_mistakes.py` | `mistake_data/*_mistakes.parquet` + `_meta.json` + `_events.json` |
 | Racing-line search (DSML) | `optimal_line.py` | `racing_lines/*_racing_line.json` |
 | LSTM tyre cliff (DL) | `train_lstm.py`, `predict_cliff.py` | `models/tyre_*`, `tyre_predictions/*_tyre.json` |
 | YOLOv11-Seg apex detection (DL) | `cv/run_inference.py` (+ `cv/extract_turns.py` for FastF1 corner windows) | `processed_video/*_HUD.mp4`, `processed_csv/*_metrics.csv`, `processed_csv/*_turns.json` |
