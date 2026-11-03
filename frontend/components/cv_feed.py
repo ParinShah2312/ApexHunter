@@ -82,7 +82,8 @@ def render_cv_feed(scrub_seconds: float, year: int, round_num: int, session_type
     """Renders the CV video feed panel with status badge and stat cards."""
     mp4_files = _find_available_videos()
     if not mp4_files:
-        st.info("No processed videos found. Run backend/scripts/run_inference.py first.")
+        st.info("Onboard video and apex metrics are unavailable in this deployment. "
+                "Telemetry and the track map remain available.")
         return
 
     selected_filename = st.selectbox(

@@ -10,6 +10,7 @@ import fastf1
 import streamlit as st
 
 from components.data_loader import FASTF1_LOOKUP_TTL_S
+from components.demo_assets import driver_metadata
 from config import TEAM_MAPPING
 
 
@@ -18,6 +19,10 @@ from config import TEAM_MAPPING
 
 def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number: str) -> str:
     """Fetches the fastest lap time for a driver in a session via FastF1."""
+    saved = driver_metadata(year, round_num, session_type, driver_number)
+    if saved:
+        seconds = saved["fastest_lap_seconds"]
+        return f"{int(seconds // 60):02d}:{seconds % 60:06.3f}"
     try:
         session = fastf1.get_session(year, round_num, session_type)
         session.load(laps=True, telemetry=False, weather=False)

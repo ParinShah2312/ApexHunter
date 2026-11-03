@@ -1,0 +1,8 @@
+# Community Cloud searches beside frontend/app.py before the repository root.
+# Display saved outputs only; training, CV inference and database clients stay local.
+streamlit==1.64.0
+pandas==2.3.3
+numpy==2.4.3
+fastf1==3.8.1
+plotly==6.3.1
+pyarrow==23.0.1

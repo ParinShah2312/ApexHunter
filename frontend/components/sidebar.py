@@ -13,7 +13,6 @@ import streamlit as st
 
 
 from config import (
-    AVAILABLE_YEARS,
     DATA_LAKE_DIR,
     DRIVER_MAPPING,
     MISTAKE_DATA_DIR,
@@ -22,6 +21,7 @@ from config import (
     TYRE_PREDICTIONS_DIR,
 )
 from components.data_loader import get_event_schedule, load_session_data
+from components.demo_assets import BUNDLE_DIR, session_files
 
 
 @dataclass
@@ -124,16 +124,27 @@ def render_sidebar() -> SidebarSelections:
     # ── Filters ───────────────────────────────────────────────────────────
     st.sidebar.markdown("### Filter Data")
 
-    # Year
-    year_idx = _get_default_index("sel_year", AVAILABLE_YEARS)
+    try:
+        files = session_files(DATA_LAKE_DIR)
+    except (ValueError, OSError, KeyError) as exc:
+        st.error(f"The bundled demo could not be loaded: {exc}")
+        st.stop()
+    if not files:
+        st.error("No telemetry is available. Restore data_lake/clean_data or the demo_data bundle.")
+        st.stop()
+    years = sorted({int(path.stem.split("_")[0]) for path in files})
+    if st.session_state.get("sel_year") not in years:
+        st.session_state.pop("sel_year", None)
+    year_idx = _get_default_index("sel_year", years)
     selected_year = st.sidebar.selectbox(
-        "Year", AVAILABLE_YEARS, index=year_idx, key="sel_year", filter_mode=None
+        "Year", years, index=year_idx, key="sel_year", filter_mode=None
     )
 
-    available_files = list(DATA_LAKE_DIR.glob(f"{selected_year}_*.parquet"))
-    if not available_files:
-        st.error(f"No data files found for {selected_year} in {DATA_LAKE_DIR}.")
-        st.stop()
+    available_files = [p for p in files if p.name.startswith(f"{selected_year}_")]
+    if files[0].is_relative_to(BUNDLE_DIR):
+        st.sidebar.info("Demo: 2023 Bahrain qualifying and race · cars #1 and #11. "
+                        "Genuine FastF1 telemetry. Saved model outputs and onboard video "
+                        "were unavailable; those panels explain what is missing.")
 
     event_names = get_event_schedule(selected_year)
     session_options, file_mapping = _build_session_options(available_files, event_names)

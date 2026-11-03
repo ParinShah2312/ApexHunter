@@ -23,6 +23,7 @@ RUN useradd --create-home --uid 10001 app \
 
 COPY --chown=app:app backend/ backend/
 COPY --chown=app:app frontend/ frontend/
+COPY --chown=app:app demo_data/ demo_data/
 COPY --chown=app:app .streamlit/ .streamlit/
 
 USER app

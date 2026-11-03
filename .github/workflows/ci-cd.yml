@@ -16,6 +16,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-demo:
+    name: Verify Community Cloud demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: frontend/requirements.txt
+      - name: Install the hosted dashboard runtime
+        run: python -m pip install -r frontend/requirements.txt ruff==0.17.3
+      - name: Validate hosted dependencies and Python
+        run: |
+          python -m pip check
+          python -m ruff check --select E9,F63,F7,F82 backend frontend deployment
+      - name: Exercise genuine demo data and dashboard selections
+        run: python -m unittest discover -s deployment/tests -v
+      - name: Report delivery mode
+        run: |
+          echo 'Community Cloud follows its configured Git branch independently of Actions. A green CI run does not prove a completed healthy rollout.' >> "$GITHUB_STEP_SUMMARY"
+
   verify-and-package:
     name: Build, check, test and package
     runs-on: ubuntu-latest
@@ -105,25 +134,3 @@ jobs:
           docker push "$image:$COMMIT_SHA"
           docker push "$image:latest"
           echo "Published \`$image:$COMMIT_SHA\` and \`$image:latest\`." >> "$GITHUB_STEP_SUMMARY"
-
-  deploy:
-    name: Optional hosting deployment hook
-    needs: verify-and-package
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions: {}
-    steps:
-      - name: Trigger deployment when a host is connected
-        shell: bash
-        env:
-          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
-        run: |
-          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
-            echo "Deployment skipped: no hosting webhook is configured." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          curl --fail --silent --show-error \
-            --connect-timeout 10 --max-time 60 \
-            --request POST --output /dev/null "$DEPLOY_WEBHOOK_URL"
-          echo "Hosting provider accepted the deployment request; check its rollout status separately." >> "$GITHUB_STEP_SUMMARY"

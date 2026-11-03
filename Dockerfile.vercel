@@ -1,0 +1,20 @@
+# Vercel container image: the hosted dashboard runtime only (no training, CV or database clients).
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+WORKDIR /app
+
+COPY frontend/requirements.txt .
+RUN python -m pip install -r requirements.txt
+
+COPY frontend/ frontend/
+COPY demo_data/ demo_data/
+COPY .streamlit/ .streamlit/
+
+# Vercel routes traffic to port 80 unless PORT is set, so this runs as root to bind it.
+# CORS/XSRF checks are off because the proxy host differs and the app is read-only with no uploads.
+CMD ["sh", "-c", "exec python -m streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=${PORT:-80} --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false"]

@@ -12,6 +12,7 @@ import fastf1
 import numpy as np
 import pandas as pd
 import streamlit as st
+from components.demo_assets import demo_manifest, driver_metadata
 
 # FastF1 lookups that fail (offline, rate limit) return an empty result; without an expiry that
 # empty result was cached until the app restarted
@@ -25,6 +26,9 @@ def get_lap_boundaries(year: int, round_num: int, session_type: str, driver_numb
     Returns a list of dicts with keys: lap_number, start_seconds, end_seconds.
     Returns an empty list on failure.
     """
+    saved = driver_metadata(year, round_num, session_type, driver_number)
+    if saved:
+        return saved["lap_boundaries"]
     try:
         session = fastf1.get_session(year, round_num, session_type)
         session.load(laps=True, telemetry=False, weather=False)
@@ -77,6 +81,9 @@ def assign_lap_numbers(df: pd.DataFrame, boundaries: List[dict]) -> pd.DataFrame
 
 def get_event_schedule(year: int) -> Dict[int, str]:
     """Fetches the F1 event schedule for a given year and returns a round→name map."""
+    saved = demo_manifest().get("event_names", {}).get(str(year))
+    if saved:
+        return {int(number): name for number, name in saved.items()}
     try:
         schedule = fastf1.get_event_schedule(year)
         return dict(zip(schedule["RoundNumber"], schedule["EventName"]))

@@ -1,0 +1,766 @@
+{
+  "schema_version": 1,
+  "source": "OpenF1 API (https://api.openf1.org)",
+  "retrieved_at": "2026-11-02T06:23:02.797376+00:00",
+  "event_names": {
+    "2023": {
+      "1": "Bahrain Grand Prix"
+    }
+  },
+  "sessions": {
+    "2023_1_Q": {
+      "year": 2023,
+      "round": 1,
+      "session": "Q",
+      "event_name": "Bahrain Grand Prix",
+      "openf1_session_key": 7768,
+      "drivers": {
+        "1": {
+          "lap_boundaries": [
+            {
+              "lap_number": 3,
+              "start_seconds": 873.39,
+              "end_seconds": 964.685
+            },
+            {
+              "lap_number": 4,
+              "start_seconds": 964.919,
+              "end_seconds": 1074.731
+            },
+            {
+              "lap_number": 5,
+              "start_seconds": 1369.521,
+              "end_seconds": 1801.681
+            },
+            {
+              "lap_number": 6,
+              "start_seconds": 1506.706,
+              "end_seconds": 1639.222
+            },
+            {
+              "lap_number": 7,
+              "start_seconds": 2200.788,
+              "end_seconds": 2887.35
+            },
+            {
+              "lap_number": 8,
+              "start_seconds": 2325.707,
+              "end_seconds": 2416.21
+            },
+            {
+              "lap_number": 9,
+              "start_seconds": 2416.268,
+              "end_seconds": 2542.024
+            },
+            {
+              "lap_number": 10,
+              "start_seconds": 3447.484,
+              "end_seconds": 4467.799
+            },
+            {
+              "lap_number": 11,
+              "start_seconds": 3562.341,
+              "end_seconds": 3652.238
+            },
+            {
+              "lap_number": 12,
+              "start_seconds": 3652.386,
+              "end_seconds": 3775.879
+            },
+            {
+              "lap_number": 13,
+              "start_seconds": 3928.35,
+              "end_seconds": 4198.3949999999995
+            },
+            {
+              "lap_number": 14,
+              "start_seconds": 4045.801,
+              "end_seconds": 4135.509
+            },
+            {
+              "lap_number": 15,
+              "start_seconds": 4135.487,
+              "end_seconds": 4254.349
+            }
+          ],
+          "fastest_lap_seconds": 89.708
+        },
+        "11": {
+          "lap_boundaries": [
+            {
+              "lap_number": 3,
+              "start_seconds": 936.342,
+              "end_seconds": 1027.821
+            },
+            {
+              "lap_number": 4,
+              "start_seconds": 1027.824,
+              "end_seconds": 1143.815
+            },
+            {
+              "lap_number": 5,
+              "start_seconds": 1374.99,
+              "end_seconds": 1751.047
+            },
+            {
+              "lap_number": 6,
+              "start_seconds": 1519.862,
+              "end_seconds": 1638.189
+            },
+            {
+              "lap_number": 7,
+              "start_seconds": 2205.866,
+              "end_seconds": 2900.83
+            },
+            {
+              "lap_number": 8,
+              "start_seconds": 2333.129,
+              "end_seconds": 2423.875
+            },
+            {
+              "lap_number": 9,
+              "start_seconds": 2423.877,
+              "end_seconds": 2551.1459999999997
+            },
+            {
+              "lap_number": 10,
+              "start_seconds": 3452.874,
+              "end_seconds": 4469.646
+            },
+            {
+              "lap_number": 11,
+              "start_seconds": 3568.075,
+              "end_seconds": 3658.2059999999997
+            },
+            {
+              "lap_number": 12,
+              "start_seconds": 3658.042,
+              "end_seconds": 3786.477
+            },
+            {
+              "lap_number": 13,
+              "start_seconds": 3932.6,
+              "end_seconds": 4198.031
+            },
+            {
+              "lap_number": 14,
+              "start_seconds": 4051.988,
+              "end_seconds": 4141.834
+            },
+            {
+              "lap_number": 15,
+              "start_seconds": 4141.784,
+              "end_seconds": 4268.629
+            }
+          ],
+          "fastest_lap_seconds": 89.846
+        }
+      },
+      "precomputed_outputs": []
+    },
+    "2023_1_R": {
+      "year": 2023,
+      "round": 1,
+      "session": "R",
+      "event_name": "Bahrain Grand Prix",
+      "openf1_session_key": 7953,
+      "drivers": {
+        "1": {
+          "lap_boundaries": [
+            {
+              "lap_number": 1,
+              "start_seconds": 218.5,
+              "end_seconds": 317.859
+            },
+            {
+              "lap_number": 2,
+              "start_seconds": 317.858,
+              "end_seconds": 415.832
+            },
+            {
+              "lap_number": 3,
+              "start_seconds": 415.793,
+              "end_seconds": 513.799
+            },
+            {
+              "lap_number": 4,
+              "start_seconds": 513.885,
+              "end_seconds": 611.861
+            },
+            {
+              "lap_number": 5,
+              "start_seconds": 611.852,
+              "end_seconds": 709.887
+            },
+            {
+              "lap_number": 6,
+              "start_seconds": 709.866,
+              "end_seconds": 807.852
+            },
+            {
+              "lap_number": 7,
+              "start_seconds": 807.88,
+              "end_seconds": 905.901
+            },
+            {
+              "lap_number": 8,
+              "start_seconds": 905.878,
+              "end_seconds": 1004.032
+            },
+            {
+              "lap_number": 9,
+              "start_seconds": 1004.033,
+              "end_seconds": 1102.311
+            },
+            {
+              "lap_number": 10,
+              "start_seconds": 1102.359,
+              "end_seconds": 1200.7279999999998
+            },
+            {
+              "lap_number": 11,
+              "start_seconds": 1200.685,
+              "end_seconds": 1299.168
+            },
+            {
+              "lap_number": 12,
+              "start_seconds": 1299.152,
+              "end_seconds": 1397.743
+            },
+            {
+              "lap_number": 13,
+              "start_seconds": 1397.76,
+              "end_seconds": 1496.242
+            },
+            {
+              "lap_number": 14,
+              "start_seconds": 1496.258,
+              "end_seconds": 1597.553
+            },
+            {
+              "lap_number": 15,
+              "start_seconds": 1597.537,
+              "end_seconds": 1715.915
+            },
+            {
+              "lap_number": 16,
+              "start_seconds": 1716.254,
+              "end_seconds": 1814.0549999999998
+            },
+            {
+              "lap_number": 17,
+              "start_seconds": 1813.705,
+              "end_seconds": 1911.3529999999998
+            },
+            {
+              "lap_number": 18,
+              "start_seconds": 1911.391,
+              "end_seconds": 2009.005
+            },
+            {
+              "lap_number": 19,
+              "start_seconds": 2008.905,
+              "end_seconds": 2106.617
+            },
+            {
+              "lap_number": 20,
+              "start_seconds": 2106.747,
+              "end_seconds": 2204.535
+            },
+            {
+              "lap_number": 21,
+              "start_seconds": 2204.511,
+              "end_seconds": 2302.093
+            },
+            {
+              "lap_number": 22,
+              "start_seconds": 2302.087,
+              "end_seconds": 2399.738
+            },
+            {
+              "lap_number": 23,
+              "start_seconds": 2399.726,
+              "end_seconds": 2497.2780000000002
+            },
+            {
+              "lap_number": 24,
+              "start_seconds": 2497.256,
+              "end_seconds": 2594.643
+            },
+            {
+              "lap_number": 25,
+              "start_seconds": 2594.676,
+              "end_seconds": 2692.048
+            },
+            {
+              "lap_number": 26,
+              "start_seconds": 2692.002,
+              "end_seconds": 2789.6839999999997
+            },
+            {
+              "lap_number": 27,
+              "start_seconds": 2789.703,
+              "end_seconds": 2887.082
+            },
+            {
+              "lap_number": 28,
+              "start_seconds": 2887.077,
+              "end_seconds": 2984.728
+            },
+            {
+              "lap_number": 29,
+              "start_seconds": 2984.809,
+              "end_seconds": 3082.38
+            },
+            {
+              "lap_number": 30,
+              "start_seconds": 3082.401,
+              "end_seconds": 3179.95
+            },
+            {
+              "lap_number": 31,
+              "start_seconds": 3179.837,
+              "end_seconds": 3277.268
+            },
+            {
+              "lap_number": 32,
+              "start_seconds": 3277.304,
+              "end_seconds": 3374.995
+            },
+            {
+              "lap_number": 33,
+              "start_seconds": 3374.974,
+              "end_seconds": 3472.6600000000003
+            },
+            {
+              "lap_number": 34,
+              "start_seconds": 3472.707,
+              "end_seconds": 3570.546
+            },
+            {
+              "lap_number": 35,
+              "start_seconds": 3570.533,
+              "end_seconds": 3668.383
+            },
+            {
+              "lap_number": 36,
+              "start_seconds": 3668.469,
+              "end_seconds": 3769.433
+            },
+            {
+              "lap_number": 37,
+              "start_seconds": 3769.389,
+              "end_seconds": 3887.879
+            },
+            {
+              "lap_number": 38,
+              "start_seconds": 3887.855,
+              "end_seconds": 3984.152
+            },
+            {
+              "lap_number": 39,
+              "start_seconds": 3984.135,
+              "end_seconds": 4080.581
+            },
+            {
+              "lap_number": 40,
+              "start_seconds": 4080.555,
+              "end_seconds": 4177.496999999999
+            },
+            {
+              "lap_number": 41,
+              "start_seconds": 4177.506,
+              "end_seconds": 4298.001
+            },
+            {
+              "lap_number": 42,
+              "start_seconds": 4297.989,
+              "end_seconds": 4402.812999999999
+            },
+            {
+              "lap_number": 43,
+              "start_seconds": 4403.237,
+              "end_seconds": 4500.127
+            },
+            {
+              "lap_number": 44,
+              "start_seconds": 4499.719,
+              "end_seconds": 4595.955
+            },
+            {
+              "lap_number": 45,
+              "start_seconds": 4595.936,
+              "end_seconds": 4692.951
+            },
+            {
+              "lap_number": 46,
+              "start_seconds": 4692.872,
+              "end_seconds": 4789.573
+            },
+            {
+              "lap_number": 47,
+              "start_seconds": 4789.683,
+              "end_seconds": 4886.692
+            },
+            {
+              "lap_number": 48,
+              "start_seconds": 4886.603,
+              "end_seconds": 4983.521
+            },
+            {
+              "lap_number": 49,
+              "start_seconds": 4983.617,
+              "end_seconds": 5080.579000000001
+            },
+            {
+              "lap_number": 50,
+              "start_seconds": 5080.537,
+              "end_seconds": 5177.787
+            },
+            {
+              "lap_number": 51,
+              "start_seconds": 5177.801,
+              "end_seconds": 5275.228
+            },
+            {
+              "lap_number": 52,
+              "start_seconds": 5275.237,
+              "end_seconds": 5372.156
+            },
+            {
+              "lap_number": 53,
+              "start_seconds": 5372.188,
+              "end_seconds": 5469.078
+            },
+            {
+              "lap_number": 54,
+              "start_seconds": 5469.077,
+              "end_seconds": 5565.755
+            },
+            {
+              "lap_number": 55,
+              "start_seconds": 5565.778,
+              "end_seconds": 5662.1
+            },
+            {
+              "lap_number": 56,
+              "start_seconds": 5662.058,
+              "end_seconds": 5759.263
+            },
+            {
+              "lap_number": 57,
+              "start_seconds": 5759.291,
+              "end_seconds": 5855.664
+            }
+          ],
+          "fastest_lap_seconds": 96.236
+        },
+        "11": {
+          "lap_boundaries": [
+            {
+              "lap_number": 1,
+              "start_seconds": 218.5,
+              "end_seconds": 319.905
+            },
+            {
+              "lap_number": 2,
+              "start_seconds": 319.904,
+              "end_seconds": 418.76599999999996
+            },
+            {
+              "lap_number": 3,
+              "start_seconds": 418.762,
+              "end_seconds": 517.592
+            },
+            {
+              "lap_number": 4,
+              "start_seconds": 517.62,
+              "end_seconds": 616.378
+            },
+            {
+              "lap_number": 5,
+              "start_seconds": 616.368,
+              "end_seconds": 714.772
+            },
+            {
+              "lap_number": 6,
+              "start_seconds": 714.772,
+              "end_seconds": 813.49
+            },
+            {
+              "lap_number": 7,
+              "start_seconds": 813.489,
+              "end_seconds": 912.293
+            },
+            {
+              "lap_number": 8,
+              "start_seconds": 912.3,
+              "end_seconds": 1011.472
+            },
+            {
+              "lap_number": 9,
+              "start_seconds": 1011.439,
+              "end_seconds": 1110.353
+            },
+            {
+              "lap_number": 10,
+              "start_seconds": 1110.406,
+              "end_seconds": 1209.491
+            },
+            {
+              "lap_number": 11,
+              "start_seconds": 1209.451,
+              "end_seconds": 1308.7
+            },
+            {
+              "lap_number": 12,
+              "start_seconds": 1308.73,
+              "end_seconds": 1407.9270000000001
+            },
+            {
+              "lap_number": 13,
+              "start_seconds": 1407.932,
+              "end_seconds": 1507.268
+            },
+            {
+              "lap_number": 14,
+              "start_seconds": 1507.148,
+              "end_seconds": 1605.887
+            },
+            {
+              "lap_number": 15,
+              "start_seconds": 1605.975,
+              "end_seconds": 1704.5829999999999
+            },
+            {
+              "lap_number": 16,
+              "start_seconds": 1704.551,
+              "end_seconds": 1803.321
+            },
+            {
+              "lap_number": 17,
+              "start_seconds": 1803.393,
+              "end_seconds": 1904.753
+            },
+            {
+              "lap_number": 18,
+              "start_seconds": 1904.813,
+              "end_seconds": 2023.6100000000001
+            },
+            {
+              "lap_number": 19,
+              "start_seconds": 2023.545,
+              "end_seconds": 2121.204
+            },
+            {
+              "lap_number": 20,
+              "start_seconds": 2121.215,
+              "end_seconds": 2218.663
+            },
+            {
+              "lap_number": 21,
+              "start_seconds": 2218.698,
+              "end_seconds": 2315.9379999999996
+            },
+            {
+              "lap_number": 22,
+              "start_seconds": 2315.946,
+              "end_seconds": 2413.115
+            },
+            {
+              "lap_number": 23,
+              "start_seconds": 2413.101,
+              "end_seconds": 2510.405
+            },
+            {
+              "lap_number": 24,
+              "start_seconds": 2510.365,
+              "end_seconds": 2607.7169999999996
+            },
+            {
+              "lap_number": 25,
+              "start_seconds": 2607.691,
+              "end_seconds": 2706.109
+            },
+            {
+              "lap_number": 26,
+              "start_seconds": 2706.113,
+              "end_seconds": 2803.567
+            },
+            {
+              "lap_number": 27,
+              "start_seconds": 2803.484,
+              "end_seconds": 2900.871
+            },
+            {
+              "lap_number": 28,
+              "start_seconds": 2900.936,
+              "end_seconds": 2998.147
+            },
+            {
+              "lap_number": 29,
+              "start_seconds": 2998.184,
+              "end_seconds": 3095.9170000000004
+            },
+            {
+              "lap_number": 30,
+              "start_seconds": 3095.932,
+              "end_seconds": 3193.332
+            },
+            {
+              "lap_number": 31,
+              "start_seconds": 3193.337,
+              "end_seconds": 3291.256
+            },
+            {
+              "lap_number": 32,
+              "start_seconds": 3291.257,
+              "end_seconds": 3388.9790000000003
+            },
+            {
+              "lap_number": 33,
+              "start_seconds": 3388.958,
+              "end_seconds": 3486.827
+            },
+            {
+              "lap_number": 34,
+              "start_seconds": 3486.831,
+              "end_seconds": 3587.5170000000003
+            },
+            {
+              "lap_number": 35,
+              "start_seconds": 3587.564,
+              "end_seconds": 3706.3489999999997
+            },
+            {
+              "lap_number": 36,
+              "start_seconds": 3706.327,
+              "end_seconds": 3803.1470000000004
+            },
+            {
+              "lap_number": 37,
+              "start_seconds": 3803.123,
+              "end_seconds": 3899.467
+            },
+            {
+              "lap_number": 38,
+              "start_seconds": 3899.496,
+              "end_seconds": 3995.927
+            },
+            {
+              "lap_number": 39,
+              "start_seconds": 3995.885,
+              "end_seconds": 4092.3140000000003
+            },
+            {
+              "lap_number": 40,
+              "start_seconds": 4092.352,
+              "end_seconds": 4189.465999999999
+            },
+            {
+              "lap_number": 41,
+              "start_seconds": 4189.428,
+              "end_seconds": 4312.95
+            },
+            {
+              "lap_number": 42,
+              "start_seconds": 4312.973,
+              "end_seconds": 4412.63
+            },
+            {
+              "lap_number": 43,
+              "start_seconds": 4412.627,
+              "end_seconds": 4509.1810000000005
+            },
+            {
+              "lap_number": 44,
+              "start_seconds": 4509.188,
+              "end_seconds": 4606.166
+            },
+            {
+              "lap_number": 45,
+              "start_seconds": 4606.171,
+              "end_seconds": 4703.099
+            },
+            {
+              "lap_number": 46,
+              "start_seconds": 4703.075,
+              "end_seconds": 4800.331999999999
+            },
+            {
+              "lap_number": 47,
+              "start_seconds": 4800.433,
+              "end_seconds": 4897.094
+            },
+            {
+              "lap_number": 48,
+              "start_seconds": 4897.056,
+              "end_seconds": 4993.915
+            },
+            {
+              "lap_number": 49,
+              "start_seconds": 4993.882,
+              "end_seconds": 5090.931
+            },
+            {
+              "lap_number": 50,
+              "start_seconds": 5090.881,
+              "end_seconds": 5188.612
+            },
+            {
+              "lap_number": 51,
+              "start_seconds": 5188.629,
+              "end_seconds": 5285.678
+            },
+            {
+              "lap_number": 52,
+              "start_seconds": 5285.69,
+              "end_seconds": 5382.7519999999995
+            },
+            {
+              "lap_number": 53,
+              "start_seconds": 5382.782,
+              "end_seconds": 5480.127
+            },
+            {
+              "lap_number": 54,
+              "start_seconds": 5480.092,
+              "end_seconds": 5577.388
+            },
+            {
+              "lap_number": 55,
+              "start_seconds": 5577.372,
+              "end_seconds": 5674.464
+            },
+            {
+              "lap_number": 56,
+              "start_seconds": 5674.48,
+              "end_seconds": 5771.044999999999
+            },
+            {
+              "lap_number": 57,
+              "start_seconds": 5771.056,
+              "end_seconds": 5867.614
+            }
+          ],
+          "fastest_lap_seconds": 96.344
+        }
+      },
+      "precomputed_outputs": []
+    }
+  },
+  "files": [
+    {
+      "path": "clean_data/2023_1_Q.parquet",
+      "bytes": 550198,
+      "sha256": "adda00a2b348f1a4072a119dbd3669b7bcb4646b89203275c393e6322fec7f67",
+      "rows": 25858
+    },
+    {
+      "path": "clean_data/2023_1_R.parquet",
+      "bytes": 1053794,
+      "sha256": "12e860eaa133f4518e4ef46c7e638445549ae0bde892a26b247742c284d1ea2a",
+      "rows": 41996
+    }
+  ]
+}
