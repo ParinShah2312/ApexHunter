@@ -182,7 +182,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ── Tab 1: Race Intelligence ──────────────────────────────────────────────────
 with tab1:
     # ── Master scrubber at the TOP of Race Intelligence ────────────────────
-    st.markdown("**⏱ Session Time — Master Scrubber**")
+    st.markdown("**⏱ Session Time — Master Shooter**")
 
     import datetime
     min_t, max_t = _get_session_time_range(sel.df_driver)
