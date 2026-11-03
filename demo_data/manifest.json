@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "source": "OpenF1 API (https://api.openf1.org)",
-  "retrieved_at": "2026-11-02T06:23:02.797376+00:00",
+  "retrieved_at": "2026-11-03T11:06:41.888068+00:00",
   "event_names": {
     "2023": {
-      "1": "Bahrain Grand Prix"
+      "1": "Indian Grand Prix"
     }
   },
   "sessions": {
@@ -12,7 +12,7 @@
       "year": 2023,
       "round": 1,
       "session": "Q",
-      "event_name": "Bahrain Grand Prix",
+      "event_name": "Indian Grand Prix",
       "openf1_session_key": 7768,
       "drivers": {
         "1": {
@@ -162,7 +162,7 @@
       "year": 2023,
       "round": 1,
       "session": "R",
-      "event_name": "Bahrain Grand Prix",
+      "event_name": "Indian Grand Prix",
       "openf1_session_key": 7953,
       "drivers": {
         "1": {
@@ -752,15 +752,15 @@
   "files": [
     {
       "path": "clean_data/2023_1_Q.parquet",
-      "bytes": 550198,
-      "sha256": "adda00a2b348f1a4072a119dbd3669b7bcb4646b89203275c393e6322fec7f67",
-      "rows": 25858
+      "bytes": 1394339,
+      "sha256": "512ee1a5805793287b3d7aa35bd944f5d600ef21b7326627e76e9cdea1e4ccca",
+      "rows": 51951
     },
     {
       "path": "clean_data/2023_1_R.parquet",
-      "bytes": 1053794,
-      "sha256": "12e860eaa133f4518e4ef46c7e638445549ae0bde892a26b247742c284d1ea2a",
-      "rows": 41996
+      "bytes": 3218192,
+      "sha256": "8d167d73e072f9833f944f4e25eadff31c0b63d3a29a5f2132dc51fdc599348c",
+      "rows": 84856
     }
   ]
 }

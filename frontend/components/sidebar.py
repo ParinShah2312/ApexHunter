@@ -142,7 +142,7 @@ def render_sidebar() -> SidebarSelections:
 
     available_files = [p for p in files if p.name.startswith(f"{selected_year}_")]
     if files[0].is_relative_to(BUNDLE_DIR):
-        st.sidebar.info("Demo: 2023 Bahrain qualifying and race · cars #1 and #11. "
+        st.sidebar.info("Demo: 2023 Indian Grand Prix qualifying and race · cars #1 and #11. "
                         "Genuine FastF1 telemetry. Saved model outputs and onboard video "
                         "were unavailable; those panels explain what is missing.")
 
