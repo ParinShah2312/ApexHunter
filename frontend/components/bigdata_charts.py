@@ -320,20 +320,3 @@ def build_algo_comparison_bar(racing_data: dict) -> go.Figure:
     for i in range(1,4):
         fig.update_yaxes(gridcolor=_GRID, row=1, col=i)
     return fig
-
-
-# ──  ──────────────────────────────────────────────────────────────────────────
-#  15. Technology stack radar chart
-# ──  ──────────────────────────────────────────────────────────────────────────
-def build_tech_radar() -> go.Figure:
-    cats = ["HDFS Storage", "Spark ETL", "MongoDB", "LSTM/AI", "Pathfinding", "Computer Vision"]
-    vals = [92, 85, 93, 78, 88, 70]
-    fig = go.Figure(go.Scatterpolar(r=vals + [vals[0]], theta=cats + [cats[0]],
-        fill="toself", fillcolor="rgba(0,212,255,0.15)",
-        line=dict(color=_ACCENT, width=2), marker=dict(size=6)))
-    fig.update_layout(polar=dict(
-        bgcolor=_DARK_BG,
-        radialaxis=dict(visible=True, range=[0,100], gridcolor="#1e293b", tickfont=dict(color="#6b7890")),
-        angularaxis=dict(gridcolor="#1e293b", tickfont=dict(color="#c8d0dc", size=11))),
-        paper_bgcolor=_PAPER, height=320, margin=dict(t=30,b=30,l=60,r=60), font=_FONT, showlegend=False)
-    return fig

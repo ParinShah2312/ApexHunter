@@ -1,34 +1,17 @@
 """
 ApexHunter Frontend - Header Bar
-Renders the persistent KPI strip above the tabs.
+One slim card above the tabs: Grand Prix and session, the driver in team colour, and four numbers
+(finishing or qualifying position, fastest lap, gap to the session's fastest lap and who set it,
+top speed).
 """
 
+from html import escape
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
-import fastf1
 import streamlit as st
 
-from components.data_loader import FASTF1_LOOKUP_TTL_S
-from config import TEAM_MAPPING
-
-
-@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
-
-
-def _get_fastest_lap(year: int, round_num: int, session_type: str, driver_number: str) -> str:
-    """Fetches the fastest lap time for a driver in a session via FastF1."""
-    try:
-        session = fastf1.get_session(year, round_num, session_type)
-        session.load(laps=True, telemetry=False, weather=False)
-        fastest = session.laps.pick_drivers(driver_number).pick_fastest()
-        lap_time = fastest["LapTime"]
-        total_seconds = lap_time.total_seconds()
-        minutes = int(total_seconds // 60)
-        seconds = total_seconds % 60
-        return f"{minutes:02d}:{seconds:06.3f}"
-    except Exception:
-        return "—"
+from config import SESSION_LABEL_MAP
 
 
 def session_from_file(session_filepath: str) -> Tuple[int, str]:
@@ -41,58 +24,67 @@ def session_from_file(session_filepath: str) -> Tuple[int, str]:
     return int(parts[1]), parts[2]
 
 
-def _driver_identity_html(driver_number: str, driver_name: str, team_name: str) -> str:
-    """Build the styled HTML div for the driver identity block."""
-    return (
-        f'<div style="text-align:right;padding:4px 0">'
-        f'<div style="font-family:\'Courier New\',monospace;font-size:2rem;'
-        f'font-weight:700;color:#00d4ff;line-height:1">{driver_number}</div>'
-        f'<div style="font-size:1rem;font-weight:600;letter-spacing:1px;'
-        f'color:#e8edf5">{driver_name.upper()}</div>'
-        f'<div style="font-size:0.75rem;color:#6b7890;letter-spacing:1px">'
-        f'{team_name}</div>'
-        f'</div>'
-    )
+def lap_time_text(seconds: Optional[float]) -> str:
+    """1:31.447 style, or an em dash."""
+    if seconds is None:
+        return "—"
+    return f"{int(seconds // 60)}:{seconds % 60:06.3f}"
+
+
+def gap_text(driver_s: Optional[float], fastest: dict) -> str:
+    """Gap of the driver's fastest lap to the session's fastest, e.g. '+0.412 s' or 'Fastest'."""
+    if driver_s is None or not fastest:
+        return "—"
+    gap = driver_s - min(fastest.values())
+    return "Fastest" if gap <= 0 else f"+{gap:.3f} s"
+
+
+def fastest_owner(fastest: dict, drivers: dict) -> str:
+    """Short name of whoever set the session's fastest lap, e.g. 'ZHO'."""
+    if not fastest:
+        return ""
+    num = min(fastest, key=fastest.get)
+    return drivers.get(num, {}).get("abbr", f"#{num}")
+
+
+def _stat(label: str, value: str, title: str = "") -> str:
+    return (f'<div style="text-align:right;min-width:100px" title="{escape(title)}">'
+            f'<div style="font-size:0.7rem;color:#8a94a6;text-transform:uppercase;letter-spacing:.6px">'
+            f'{escape(label)}</div><div style="font-size:1.25rem;font-weight:600;color:#e8edf5;'
+            f'font-variant-numeric:tabular-nums">{value}</div></div>')
 
 
 def render_header_bar(sel) -> None:
-    """Renders the persistent KPI strip above the tabs.
-
-    Args:
-        sel: SidebarSelections dataclass.
-    """
-    cols = st.columns([3, 1.5, 1.5, 1.5])
-
-    # Derive round_num and session_type
-    round_num, session_type = session_from_file(sel.session_filepath)
-
-    # Extract track name from session label ("Round N: TrackName - Session")
-    try:
-        track_name = sel.session_label.split(": ", 1)[1].rsplit(" - ", 1)[0]
-    except (IndexError, ValueError):
-        track_name = "—"
-
-    # KPI 1 — Track
-    with cols[0]:
-        st.metric(label="Track", value=track_name)
-
-    # KPI 2 — Lap Time
-    with cols[1]:
-        lap_time_str = _get_fastest_lap(sel.year, round_num, session_type, sel.driver_number)
-        st.metric(label="Fastest Lap Time", value=lap_time_str)
-
-    # KPI 3 — Top Speed
-    with cols[2]:
-        top_speed = float(sel.df_driver["Speed"].max()) if not sel.df_driver.empty else 0.0
-        st.metric("Top Speed", f"{top_speed:.1f} km/h")
-
-    # Column 4 — Driver Identity
-    with cols[3]:
-        team_name = TEAM_MAPPING.get(sel.driver_number, "Unknown Team")
-        st.markdown(
-            _driver_identity_html(sel.driver_number, sel.driver_name, team_name),
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("---")
-
+    """Renders the slim header card. sel: SidebarSelections."""
+    info = sel.session_info or {}
+    driver = info.get("drivers", {}).get(sel.driver_number, {})
+    color = driver.get("color", "#8a94a6")
+    team = driver.get("team", "")
+    fastest = info.get("fastest_s", {})
+    driver_s = fastest.get(sel.driver_number)
+    position = driver.get("position")
+    owner = fastest_owner(fastest, info.get("drivers", {}))
+    is_race = sel.session_type == "R"
+    top_speed = float(sel.df_driver["Speed"].max()) if not sel.df_driver.empty else None
+    place = " · ".join(p for p in (str(sel.year), f"Round {sel.round_num}",
+                                   SESSION_LABEL_MAP.get(sel.session_type, sel.session_type),
+                                   info.get("location", "")) if p)
+    html = (
+        '<div style="display:flex;align-items:center;gap:28px;flex-wrap:wrap;padding:12px 18px;'
+        'background:#131924;border:1px solid #ffffff14;border-radius:10px;margin-bottom:8px">'
+        f'<div style="flex:1;min-width:220px"><div style="font-size:1.35rem;font-weight:700;'
+        f'color:#e8edf5">{escape(sel.event_name)}</div>'
+        f'<div style="font-size:0.85rem;color:#8a94a6">{escape(place)}</div></div>'
+        f'<div style="border-left:4px solid {color};padding-left:10px;min-width:180px">'
+        f'<div style="font-size:1.05rem;font-weight:600;color:#e8edf5">'
+        f'{escape(sel.driver_name)} <span style="color:#8a94a6;font-weight:400">#{sel.driver_number}'
+        f'</span></div><div style="font-size:0.85rem;color:{color}">{escape(team)}</div></div>'
+        + _stat("Finished" if is_race else "Qualified", f"P{position}" if position else "—")
+        + _stat("Fastest lap", lap_time_text(driver_s), "This driver's best lap of the session")
+        + _stat(f"Gap to fastest ({owner})" if owner else "Gap to fastest", gap_text(driver_s, fastest),
+                "Gap to the fastest single lap of the session"
+                + (". In a race this is often set late on fresh tyres, not by the winner" if is_race else ""))
+        + _stat("Top speed", "—" if top_speed is None else f"{top_speed:.0f} km/h")
+        + '</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)

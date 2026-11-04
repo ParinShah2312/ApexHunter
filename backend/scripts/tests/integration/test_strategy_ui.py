@@ -1,9 +1,9 @@
-"""Integration test: the AI tab's tyre pace / pit window card (ROADMAP §C step 8) on a real race.
+"""Integration test: the Tyres & Pit Window tab (ROADMAP §C step 8, §3 step 4) on a real race.
 
 No mocks: the output is built from real FastF1 laps (Russell, Singapore 2023, "no change" wear, so no
-trained model is needed) and rendered with Streamlit's AppTest. Checks that what the card shows (the
+trained model is needed) and rendered with Streamlit's AppTest. Checks that what the tab shows (the
 summary, the real stop, the shaded window and safety-car laps, the lap times) is what the output says
-and what happened in the race.
+and what happened in the race. The model switch and comparison bars: test_strategy_tab.py.
 """
 
 import json
@@ -26,9 +26,9 @@ CARD = f"""
 import json, sys
 sys.path.insert(0, {str(FRONTEND_DIR)!r})
 import streamlit as st
-from components.ai_analysis import _render_strategy_column
+from components.strategy_tab import render_strategy_tab
 with open(st.session_state["path"], encoding="utf-8") as f:
-    _render_strategy_column(json.load(f))
+    render_strategy_tab(json.load(f))
 """
 
 
@@ -78,23 +78,18 @@ class TestStrategyCardOnRealRace(unittest.TestCase):
     def test_card_shows_the_first_stint_as_in_the_output_and_the_race(self):
         at = self.at
         self.assertFalse(at.exception, [e.value for e in at.exception])
-        self.assertEqual(at.selectbox[0].value, "Stint 1 · MEDIUM · laps 1-20")
+        self.assertEqual(at.session_state["tyre_stint_"], 1)              # opens on stint 1
+        self.assertEqual(at.session_state["tyre_model_"], "no_change")    # the file's only source
         text = " ".join(m.value for m in at.markdown)
         for line in self.out["stints"][0]["summary"]:
             self.assertIn(line, text)
-        caption = " ".join(c.value for c in at.caption)
-        self.assertIn('Wear from: "No change" (fuel only)', caption)
-        table = at.dataframe[0].value
-        self.assertEqual(len(table), 2)
-        shown = table[table["Wear from"].str.endswith("(shown)")]
-        self.assertEqual(shown["Wear from"].iloc[0], '"No change" (fuel only) (shown)')
-        margin = self.scores["no_change"]["hit_pct"] - self.scores["no_change"]["random_pct"]
-        self.assertAlmostEqual(float(shown["Margin"].iloc[0]), round(margin, 1))
-        metrics = {m.label: (m.value, m.delta) for m in at.metric}
+        metrics = {m.label: m.value for m in at.metric}
         # Russell really pitted on lap 20, under the safety car (FastF1 PitInTime)
         real_stop = int(self.laps.loc[self.laps["PitInTime"].notna(), "LapNumber"].min())
         self.assertEqual(real_stop, 20)
-        self.assertEqual(metrics["Real stop"], ("Lap 20", "in window"))
+        self.assertEqual(metrics["Real stop"], "Lap 20")
+        self.assertEqual(metrics["Real stop in the window"], "Yes")
+        self.assertEqual(metrics["Lap-time error, this race"], "—")       # rule-based: no predictions
 
     def test_chart_shades_the_window_and_safety_car_laps_and_plots_real_lap_times(self):
         spec = json.loads(self.at.get("plotly_chart")[0].proto.spec)
@@ -110,7 +105,7 @@ class TestStrategyCardOnRealRace(unittest.TestCase):
         self.assertIn("Window laps after the real stop (21-24)", caption)
         # the plotted values (Plotly 6 encodes them in the spec, so read the same figure object)
         sys.path.insert(0, str(FRONTEND_DIR))
-        from components.ai_analysis import _build_strategy_figure
+        from components.strategy_tab import _build_strategy_figure
         fig = _build_strategy_figure(self.out, self.out["stints"][0])
         real, other = fig.data[0], fig.data[1]
         lap5 = self.laps.loc[self.laps["LapNumber"] == 5, "LapTime"].dt.total_seconds().iloc[0]

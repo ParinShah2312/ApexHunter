@@ -1,4 +1,4 @@
-# ApexHunter 2.0 — Roadmap (AY 2026–27)
+# ApexHunter — Roadmap (AY 2026–27)
 
 **Courses:** Data Science & Machine Learning (DSML, CMP707) · Deep Learning (DL)
 **Student:** Parin Shah (23001091)
@@ -8,7 +8,7 @@ descriptions, dated decisions, intermediate numbers) is in
 [ARCHIVE/ROADMAP_full_2026-11-04.md](ARCHIVE/ROADMAP_full_2026-11-04.md). Section references in code
 comments (§B mistakes, §C tyre/pit strategy, §D RNN/LSTM/autoencoder, §E dashboard) point there.
 
-Status: ✅ done · 🔄 in progress · ⏳ to do · ⏸ deferred · 🧊 frozen
+Status: ✅ done · 🔄 in progress · ⏳ to do · ⏸ deferred
 
 ---
 
@@ -22,8 +22,8 @@ Status: ✅ done · 🔄 in progress · ⏳ to do · ⏸ deferred · 🧊 frozen
 | Old "tyre cliff" predictor removed | ✅ |
 | Project-wide review (bugs #48–#54) | ✅ |
 | Docs condensed; team guide (`TEAM_GUIDE.md`, gitignored) | ✅ |
-| **Dashboard redesign (§3)** | ⏳ next |
-| Report (DSML) + presentation (DSML + DL): drafts in `docs/submission/`, regenerated once after the redesign (planted mistakes kept, reframed as a controlled test on synthetic mistakes), then reviewed by the user | 🔄 |
+| **Dashboard redesign (§3)** | ✅ done (2026-11-05) |
+| Report (DSML, 21 pages) + presentation (DSML + DL, 25 slides) in `docs/submission/`: rebuilt 2026-11-05 (final numbers, autoencoder, synthetic-mistake test with its limit and the real-lap check, dashboard section, one baseline row per comparison) | 🔄 user review |
 | Outputs for every race and driver (#7) | ⏸ not confirmed |
 
 ## 2. Scope (fixed)
@@ -39,24 +39,63 @@ Course mapping: anomaly detection (DSML 4.3); Ridge and regression metrics (DSML
 `LinearReg.ipynb`); RNN, vanishing gradients and LSTM (DL NN deck p61–85); precision/recall/F1 and
 MAE/RMSE/R²/MAPE, train vs test error (DSML 3.1). Full survey: `ARCHIVE/COURSE_ALIGNMENT.md`.
 
-**Frozen (kept, not developed):** YOLOv11-Seg apex detection, racing-line search (A\*/Dijkstra/BFS),
+**From last semester (in the More tab):** YOLOv11-Seg apex detection, racing-line search (A\*/Dijkstra/BFS),
 Big Data stack (Spark, HDFS, MongoDB). **Dropped:** other anomaly detectors, Random Forest /
 boosting, clustering + PCA, classification, GRU, choosing a tyre compound (race data cannot rank the
 compounds).
 
-## 3. Dashboard redesign (next; details to agree with the user)
+## 3. Dashboard redesign (done 2026-11-05)
 
-- **Layout:** frozen parts (CV video, racing line, Big Data) in their own tabs that do not load at
-  start; the main view is the DSML/DL work.
-- **Sidebar:** Grand Prix + session type instead of one long session list.
-- **Charts:** a fitting chart per telemetry channel (e.g. braking as shaded zones), more detail per
-  lap; new views for the three mistake detectors and the tyre models.
-- **Carried over:** session time is not reset between sessions; "waiting in the garage" note shown
-  for races; CV cards count frames not corners; the Race Intelligence mistakes map draws one marker
-  per flagged sample instead of per event; unused racing-line overlay code; unused
-  `render_ai_analysis` arguments; hard-coded scores on the Big Data radar; pathfinding section
-  always shows the first file; corrupt strategy file shown as "missing"; check selectors reset on a
-  driver change; MongoDB leaderboard ranks by a ~2 % rate (#41); cut-off card label (#43).
+**Look:** dark theme, one accent colour, few emojis; one fixed colour per model everywhere; one-line
+caption per chart ("what this shows"); hints on hover; units everywhere; tables collapsed.
+
+Build order:
+1. ✅ **Shell.** Sidebar: season switch (2023 | 2024) → Grand Prix dropdown → session switch
+   (Qualifying | Race) → driver (with team); badges "Mistakes ✓/✗", "Pit window ✓/✗". Opens on
+   2023 Bahrain Race, Verstappen. Slim top bar: GP · session, driver, position, fastest lap, gap to
+   the session's fastest (and who set it), top speed. Tabs: Overview · Driver Mistakes · Tyres & Pit
+   Window · Telemetry · More; only the open tab runs.
+2. ✅ **Telemetry.** Lap picker (lap-time dots; pit grey, SC yellow, fastest purple; click to pick);
+   compare with none / another lap / another driver's fastest (default: session fastest). Stacked
+   charts vs distance in the lap (m), corners marked T1…: speed (line), time delta (line, red/green
+   fill), throttle (filled area), brake (shaded bands, it is on/off), gear (step line); RPM in a
+   closed "More channels" panel. Track map coloured by speed/gear. Shared hover line + map dot; lap
+   position slider (the scrubber, this tab only); zoom one chart = zoom all. Cards: lap time, gap,
+   top speed, full-throttle %. Distance = speed × time summed per lap; delta = time at the same
+   fraction of the lap (ends exactly at the lap-time gap). Slider and hover name the place ("Exit
+   of Turn 4", "Straight: Turn 4 → Turn 5"; slider labels also carry the metres, as Streamlit needs
+   unique labels); hover text is plain sentences. The session-time
+   scrubber, old track map and "brake overlap" card were removed. Fixed: a tab-header style rule
+   greyed out every switch inside a tab (selected option not visible).
+3. ✅ **Driver Mistakes.** Map with one marker per event; event list; click an event → driver vs field
+   (speed, throttle, brake) at that corner. Detector switch Z-score / Isolation Forest / autoencoder
+   (backend also saves the Z-score and autoencoder flags; re-run the 4 sessions, numbers unchanged).
+   Detector comparison chart (precision/recall/F1) + real-lap check. Done: re-run of the 4 sessions
+   left every meta file and the Isolation Forest outputs identical; each mistake's detail also shows
+   the driver's usual laps (median); cards: mistakes, time lost, share that cost time vs random
+   spots, readings flagged.
+4. ✅ **Tyres & Pit Window.** Stint buttons; lap-time chart with window band, SC shading, real stop;
+   model switch Best / Ridge / RNN / LSTM / No change; bars: lap-time error per model, window hit
+   rate vs random.
+   Done: `predict_strategy.py --source all` stores every source in each file (best on top, rest
+   under "sources"); all 159 files regenerated (top part identical to before, 30 MB in total).
+   Cards: real stop, normal window, in the window, lap-time error this race. Error bars start at 0.
+   The tab shows only the three trained models (user, 2026-11-05); "no change" and "laps
+   driven" stay in the outputs, check_strategy.py and these docs (§2 scope unchanged).
+5. ✅ **Overview.** Mistake summary (count, time lost, top 3), pit-window summary per stint, model
+   scoreboard (mistake F1, lap-time error).
+   Done: mistakes card (Isolation Forest: count, time lost, share that cost time, top 3) and pit
+   card (stops in window, per-stint line; follows the Tyres tab's model); scoreboard = trained
+   models only: mean planted F1 over the scored sessions, test lap-time error.
+6. ✅ **More.** Switch inside: Apex detection / Racing line / Big Data (moved as they are; only the
+   chosen one loads).
+7. ✅ **Finish.** Style pass, carried-over fixes below, real-data AppTest checks, docs.
+
+- **Carried over:** all fixed (step 7: a corrupt pit-window file now says so instead of "missing";
+  step 6: CV cards now count
+  corners, 12 of 15 on the Bahrain pole lap; made-up radar removed; pathfinding shows the chosen
+  session's file and names it; #41, #43. Gone with the old views: racing-line overlay code, old
+  check selectors.)
 - **Minor, deferred:** `utils.py` continues with defaults on a broken `config.json`;
   `get_directory_size` defined twice; satellite downloader counts failures as skips;
   `requirements.txt` unpinned (CLAUDE.md lists tested versions); 2024 R21 labelled "in the
@@ -64,7 +103,7 @@ compounds).
 
 ## 4. Bug log
 
-All fixed except #7 (⏸), #41 and #43 (⏳, redesign). Each fix has a test that fails on the old code
+All fixed except #7 (⏸). Each fix has a test that fails on the old code
 or a recorded real-data check. Details: archived roadmap.
 
 | # | Bug |
@@ -109,9 +148,9 @@ or a recorded real-data check. Details: archived roadmap.
 | 38 | Unused imports, constants and dead code |
 | 39 | Racing-line "time saved" not meaningful |
 | 40 | Spark numeric-column check never matched |
-| 41 | MongoDB leaderboard ranks by a rate that is ~2 % for everyone ⏳ |
+| 41 | MongoDB leaderboard ranked by a rate that is ~2 % for everyone (now a plain list; not run: MongoDB offline) |
 | 42 | Streamlit static-folder warning |
-| 43 | Cut-off card label ⏳ |
+| 43 | Cut-off card label (old mistakes cards, replaced in step 3) |
 | 44 | Lap means not weighted by time (irregular samples) |
 | 45 | Tyre target was absolute speed (mostly encodes the track) |
 | 46 | Config recorded the search run's validation score |
@@ -123,8 +162,9 @@ or a recorded real-data check. Details: archived roadmap.
 | 52 | Small future leak: no prediction for the lap after a run of clean laps |
 | 53 | Dashboard re-assigned the backend's lap numbers |
 | 54 | Wrong dashboard hints and script paths |
+| 55 | Header showed one fixed team per car number (2023 drivers got 2024 teams) |
 
-Next free number: **#55**.
+Next free number: **#56**.
 
 ## 5. Working rules
 

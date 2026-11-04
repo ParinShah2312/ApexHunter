@@ -45,7 +45,7 @@ from components.bigdata_charts import (
     build_spark_gauge, build_spark_waterfall, build_session_file_size_bar,
     build_speed_distribution, build_correlation_heatmap, build_speed_rpm_scatter,
     build_speed_over_distance,
-    build_algo_comparison_bar, build_tech_radar,
+    build_algo_comparison_bar,
 )
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -147,14 +147,11 @@ def _fetch_leaderboard() -> List[Dict[str, Any]]:
 # ── Section Renderers ─────────────────────────────────────────────────────────
 def _render_pipeline_banner() -> None:
     """Render the Technology Stack and Pipeline Architecture banner section."""
-    st.subheader("🔬 Technology Stack & Pipeline Architecture")
-
-    col_radar, col_dag = st.columns([1, 2])
-    with col_radar:
-        st.markdown("##### Tech Coverage Radar")
-        st.plotly_chart(build_tech_radar(), width='stretch')
+    # The old "tech coverage radar" plotted hard-coded scores (not measured), so it was removed
+    st.markdown("#### Pipeline")
+    col_dag = st.container()
     with col_dag:
-        st.markdown("##### End-to-End Pipeline DAG")
+        st.caption("From the FastF1 download to the dashboard: storage, cleaning and the models.")
         st.plotly_chart(build_pipeline_dag(), width='stretch')
 
 
@@ -164,7 +161,7 @@ def _render_hdfs_section(hdfs_log: Optional[Dict[str, Any]]) -> None:
     Args:
         hdfs_log: Parsed hdfs_status.json dict, or None if unavailable.
     """
-    st.subheader("📦 HDFS Distributed Storage")
+    st.markdown("#### HDFS storage")
 
     if hdfs_log is None:
         st.info("Run `hdfs_manager.py --stats` to populate HDFS statistics.")
@@ -208,7 +205,7 @@ def _render_spark_section(spark_log: Optional[Dict[str, Any]]) -> None:
     Args:
         spark_log: Parsed spark_run_log.json dict, or None if unavailable.
     """
-    st.subheader("⚡ Apache Spark ETL Processing")
+    st.markdown("#### Spark cleaning (ETL)")
 
     if spark_log is None:
         st.info("Run `spark_clean_telemetry.py --hdfs --force` to populate Spark statistics.")
@@ -264,7 +261,7 @@ def _render_telemetry_section(df_full: Optional[pd.DataFrame] = None) -> None:
     Args:
         df_full: Full session DataFrame from sidebar selection, or None.
     """
-    st.subheader("📊 Telemetry Data Exploration")
+    st.markdown("#### Telemetry data exploration")
 
     # Use the sidebar-selected session data if available, else fall back to sample
     if df_full is not None and not df_full.empty:
@@ -304,24 +301,21 @@ def _render_telemetry_section(df_full: Optional[pd.DataFrame] = None) -> None:
     # Quick stats
     st.markdown("##### Session Quick Stats")
     if "Speed" in sample_df.columns:
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        with c1:
-            st.metric(label="Avg Speed", value=f"{sample_df['Speed'].mean():.1f} km/h")
-        with c2:
-            st.metric(label="Max Speed", value=f"{sample_df['Speed'].max():.1f} km/h")
-        with c3:
-            st.metric(label="Unique Drivers", value=f"{sample_df['Driver'].nunique()}")
-        with c4:
-            st.metric(label="Avg RPM", value=f"{sample_df['RPM'].mean():.0f}")
-        with c5:
-            st.metric(label="Max RPM", value=f"{sample_df['RPM'].max():.0f}")
-        with c6:
-            st.metric(label="Data Points", value=f"{len(sample_df):,}")
+        stats = [("Avg speed", f"{sample_df['Speed'].mean():.0f} km/h"),
+                 ("Max speed", f"{sample_df['Speed'].max():.0f} km/h"),
+                 ("Drivers", f"{sample_df['Driver'].nunique()}"),
+                 ("Avg RPM", f"{sample_df['RPM'].mean():,.0f}"),
+                 ("Max RPM", f"{sample_df['RPM'].max():,.0f}"),
+                 ("Readings", f"{len(sample_df):,}")]
+        for row in (stats[:3], stats[3:]):
+            for col, (label, value) in zip(st.columns(3), row):
+                col.metric(label=label, value=value)
 
 
-def _render_pathfinding_section() -> None:
-    """Render the Pathfinding Algorithm Comparison section."""
-    st.subheader("🏁 Pathfinding Algorithm Comparison")
+def _render_pathfinding_section(preferred: Optional[str] = None) -> None:
+    """Render the Pathfinding Algorithm Comparison section (preferred = the chosen session and
+    driver's racing-line file; otherwise the first saved one, and the caption says which)."""
+    st.markdown("#### Racing-line search: algorithm comparison")
 
     racing_dir = Path(DATA_LAKE_DIR) / "racing_lines"
     racing_files = sorted(racing_dir.glob("*.json")) if racing_dir.exists() else []
@@ -330,7 +324,9 @@ def _render_pathfinding_section() -> None:
         st.info("Run `optimal_line.py` to generate pathfinding data.")
         return
 
-    racing_data = _load_json_log(racing_files[0])
+    chosen = next((f for f in racing_files if preferred and f.name == Path(preferred).name), racing_files[0])
+    st.caption(f"Racing line: {chosen.stem.replace('_racing_line', '')} (session_round_type_driver)")
+    racing_data = _load_json_log(chosen)
     if not racing_data:
         st.info("Run `optimal_line.py` to generate pathfinding data.")
         return
@@ -352,7 +348,7 @@ def _render_pathfinding_section() -> None:
 
 def _render_mongo_section() -> None:
     """Render the MongoDB Document Analytics section."""
-    st.subheader("🍃 MongoDB Document Analytics")
+    st.markdown("#### MongoDB documents")
 
     try:
         if not MONGO_IMPORT_OK:
@@ -365,13 +361,12 @@ def _render_mongo_section() -> None:
 
         # Summary metrics
         summary = get_session_summary(db)
-        c1, c2, c3, c4 = st.columns(4)
+        # No "mistake rate" card or ranking: every detector flags 2 % of readings by design (#41)
+        c1, c2, c4 = st.columns(3)
         with c1:
             st.metric(label="Sessions in DB", value=f"{summary.get('total_sessions', 0):,}")
         with c2:
-            st.metric(label="Drivers Analyzed", value=f"{summary.get('total_drivers_analyzed', 0):,}")
-        with c3:
-            st.metric(label="Mistake Rate", value=f"{summary.get('overall_mistake_rate_pct', 0.0):.1f}%")
+            st.metric(label="Drivers analysed", value=f"{summary.get('total_drivers_analyzed', 0):,}")
         with c4:
             q = summary.get("sessions_by_type", {}).get("Q", 0)
             r = summary.get("sessions_by_type", {}).get("R", 0)
@@ -380,13 +375,12 @@ def _render_mongo_section() -> None:
         # Leaderboard
         leaderboard = _fetch_leaderboard()
         if leaderboard:
-            st.markdown("##### Driver Mistake Leaderboard")
+            st.markdown("##### Drivers in the database")
             df_lb = pd.DataFrame(leaderboard).rename(columns={
-                "driver": "Driver", "session_file": "Session",
-                "mistake_rate_pct": "Mistake %", "mean_anomaly_score": "Anomaly Score",
-                "total_rows": "Rows",
-            })
-            st.dataframe(df_lb, width='stretch', height=300)
+                "driver": "Driver", "session_file": "Session", "total_rows": "Readings"})
+            keep = [c for c in ("Session", "Driver", "Readings") if c in df_lb.columns]
+            st.dataframe(df_lb[keep].sort_values(keep[:2]) if keep else df_lb, width='stretch',
+                         height=300, hide_index=True)
 
         # Per-driver drill-down
         if leaderboard:
@@ -403,8 +397,7 @@ def _render_mongo_section() -> None:
                         df_dm = pd.DataFrame(rows)
                         keep = [
                             c for c in [
-                                "session_file", "mistake_rate_pct", "mean_speed_at_mistake",
-                                "best_contamination", "mean_anomaly_score", "total_rows",
+                                "session_file", "mean_speed_at_mistake", "mean_anomaly_score", "total_rows",
                             ]
                             if c in df_dm.columns
                         ]
@@ -424,13 +417,13 @@ def _render_mongo_section() -> None:
 
 
 # ── Main Entry Point ──────────────────────────────────────────────────────────
-def render_bigdata_tab(df_full: Optional[pd.DataFrame] = None) -> None:
+def render_bigdata_tab(df_full: Optional[pd.DataFrame] = None, racing_line_path: Optional[str] = None) -> None:
     """Render the Big Data analytics tab in the Streamlit dashboard.
 
     Args:
         df_full: Optional full session DataFrame from sidebar selection.
+        racing_line_path: The chosen session and driver's racing-line file, if any.
     """
-    st.header("🗄️ Big Data Analytics Dashboard")
 
     _render_pipeline_banner()
     st.markdown("---")
@@ -440,6 +433,6 @@ def render_bigdata_tab(df_full: Optional[pd.DataFrame] = None) -> None:
     st.markdown("---")
     _render_telemetry_section(df_full)
     st.markdown("---")
-    _render_pathfinding_section()
+    _render_pathfinding_section(racing_line_path)
     st.markdown("---")
     _render_mongo_section()

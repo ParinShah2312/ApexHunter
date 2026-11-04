@@ -1,4 +1,4 @@
-# ApexHunter 2.0 — Project Documentation
+# ApexHunter — Project Documentation
 
 **Project:** F1 telemetry and onboard-video analytics · **Courses:** Data Science & Machine Learning
 (CMP707) · Deep Learning · **Year:** 2026–27 · **Author:** Parin Shah (23001091)
@@ -20,9 +20,9 @@ and shows the results on a Streamlit dashboard.
 |---|---|---|---|
 | **Driver mistakes** | Z-score vs Isolation Forest vs LSTM autoencoder | DSML / DL | Where did the driver do something different from the fastest drivers, in a way that cost time? |
 | **Tyre pace + pit window** | "No change" vs Ridge vs vanilla RNN vs LSTM | DSML / DL | How much slower will the next lap be, and when should the driver stop for tyres? |
-| Racing line (frozen) | A\*, Dijkstra, BFS on a grid | DSML (search) | Is there a cheaper path through the driver's own line? |
-| Apex detection (frozen) | YOLOv11-Seg | DL (CNN) | How close does the car get to each apex curb? |
-| Data pipeline | pandas; Spark, HDFS, MongoDB (frozen) | — | Clean, store and serve the data |
+| Racing line | A\*, Dijkstra, BFS on a grid | DSML (search) | Is there a cheaper path through the driver's own line? |
+| Apex detection | YOLOv11-Seg | DL (CNN) | How close does the car get to each apex curb? |
+| Data pipeline | pandas; Spark, HDFS, MongoDB | — | Clean, store and serve the data |
 
 **Main results:** the LSTM autoencoder finds the most planted mistakes (F1 0.40 vs 0.34 Isolation
 Forest vs 0.28 Z-score). The RNN and LSTM predict the next lap best (0.33 s error vs 0.34 s Ridge vs
@@ -37,12 +37,12 @@ backend/scripts/
   utils.py                     shared paths, config, logger, FastF1 cache
   detect_mistakes.py           mistake detection (+ --compare: all three detectors)
   train_ridge.py, train_lstm.py --cell lstm|rnn, check_strategy.py, predict_strategy.py
-  optimal_line.py              racing line (frozen)
+  optimal_line.py              racing line
   etl/                         download, clean, timestamp fix, video and satellite downloads
   isolation_forest/            mistakes_features, _io, _model, _eval, _autoencoder, _events, _timeloss
   lstm/                        tyre_data, tyre_model (TyrePaceRNN), tyre_io, tyre_ridge
   strategy/                    pit_cost, pit_window, strategy_check, strategy_output
-  cv/, racing_line/, bigdata/  frozen
+  cv/, racing_line/, bigdata/  apex detection, racing line, Big Data
   tests/                       unit/ (31 files), integration/ (9 files), run_tests.py
 frontend/app.py, components/   Streamlit dashboard
 models/                        best.pt (YOLO); tyre LSTM, RNN and Ridge models + configs
@@ -136,11 +136,12 @@ the best epoch is kept.
   better than "no change" (39 % vs 43 % over 1,345 stints). Real stops depend on undercuts, traffic
   and safety cars, and wear is small (~0.05 s/lap), so better lap-time models cannot improve the
   pit window. The dashboard shows whichever source scores best (now "laps driven").
-- **Output:** `predict_strategy.py --session … --driver …` →
+- **Output:** `predict_strategy.py --session … --driver … [--source all]` →
   `data_lake/tyre_predictions/{race}_{driver}_strategy.json` (laps, stints, window, safety-car
-  calls, real stop, summary). Outputs exist for every driver of 8 races.
+  calls, real stop, summary; with `--source all`, every wear source for the dashboard's model
+  switch). Outputs exist for every driver of 8 races, all with `--source all`.
 
-## 6. Frozen parts (from last semester; bugs fixed, not developed)
+## 6. Other parts (from last semester; More tab)
 
 - **Racing line** (`optimal_line.py`): the driver's own session positions become a grid (cost =
   slow and braking cells are expensive); A\*, Dijkstra and BFS search it between 5 points of the
@@ -152,16 +153,31 @@ the best epoch is kept.
 
 ## 7. Dashboard
 
-`streamlit run frontend/app.py` — tabs: **Race Intelligence** (session-time scrubber, onboard video
-with apex badge, track map), **Telemetry** (speed, throttle, brake, gear, RPM), **AI Analysis**
-(mistake events on a track map and in a table; pit window per stint with real vs predicted lap
-times, safety-car laps, best and real stop, scores of every wear source), **Racing Line**,
-**Big Data** (pipeline, HDFS/Spark stats, EDA, MongoDB). A redesign is next (ROADMAP §3).
+`streamlit run frontend/app.py`. Redesigned in November 2026 (ROADMAP §3).
+- **Sidebar:** season switch → Grand Prix → Qualifying/Race switch → driver (with team); badges show
+  whether mistake and pit-window results exist. Opens on 2023 Bahrain Race, Verstappen.
+- **Header:** Grand Prix and session, driver in team colour (team from FastF1 for that session),
+  finishing/qualifying position, fastest lap, gap to the session's fastest lap and who set it, top
+  speed.
+- **Tabs** (only the open one runs): **Overview** (the driver's mistakes and pit windows in short; scoreboard of the trained models:
+  mean planted-mistake F1, test lap-time error), **Driver Mistakes** (detector switch
+  Isolation Forest / LSTM autoencoder / Z-score; each one's mistakes on a track map and in a list;
+  the chosen mistake against the field and the driver's usual laps; how the three detectors compare
+  on the planted-mistake test and the real-lap check), **Tyres & Pit Window** (model switch Ridge / RNN / LSTM, opening on the best pit-window
+  margin; the "no change" and "laps driven" baselines are not shown there, see §5; stint
+  buttons; the stint's lap times with the window, safety-car laps, real and best stop and the
+  model's predicted laps; lap-time error per model on the test races; pit window vs a random
+  window),
+  **Telemetry** (one lap at a time against distance, compared with another lap or another driver's
+  fastest lap: lap picker, speed, time delta, throttle, brake bands, gear, RPM, track map coloured by
+  speed or gear, a position slider that names the place on the lap, plain-text hover), **More** (apex detection video
+  with its own player slider and corners hitting the apex, racing line with where it exists,
+  Big Data).
 
 ## 8. Status
 
 ### Done this semester
-Bug fixes (#1–#54) and four test audits; mistake detection rebuilt and compared with Z-score and an
+Bug fixes (#1–#55) and four test audits; mistake detection rebuilt and compared with Z-score and an
 LSTM autoencoder; tyre models rebuilt around lap time with Ridge, RNN and LSTM and a pit-window
 check against real stops; old "tyre cliff" removed; project-wide review. Every change and its
 checks: [ARCHIVE/PROJECT_DOCUMENTATION_full_2026-11-04.md](ARCHIVE/PROJECT_DOCUMENTATION_full_2026-11-04.md) §8.
@@ -172,14 +188,14 @@ checks: [ARCHIVE/PROJECT_DOCUMENTATION_full_2026-11-04.md](ARCHIVE/PROJECT_DOCUM
 | Tyre models | Better lap times, but no better pit windows (ceiling test). |
 | Mistakes | Two thirds of planted mistakes are missed; some events differ from the field without costing time; only 4 sessions scored. |
 | Outputs | Mistakes for 4 sessions, pit window for 8 races, racing line and CV for one session each (#7). |
-| Dashboard | Several presentation issues left for the redesign (ROADMAP §3). |
+| Dashboard | Clicking map markers, list rows and lap dots is not covered by automated tests (the dropdowns doing the same are). MongoDB section not checked (MongoDB not running). |
 | Racing line | Cannot find a faster line by design. |
 | CV | Video list not filtered by session; YOLO training metrics not in the repo. |
 | Misc | `Time` column is made from the row index; satellite images unused. |
 
 ## 9. Testing
 
-177 tests (137 unit + 40 integration), all passing. Every test runs real project code on real data
+197 tests (140 unit + 57 integration), all passing. Every test runs real project code on real data
 (cached races, integration) or small inputs with a known answer (unit); no mocks. Each bug fix has a
 test that fails on the old code. Run: `python backend/scripts/tests/run_tests.py` (unit, ~30 s) or
 `--all` (with integration, ~3 min); lint: `python -m ruff check --select F backend frontend`.
@@ -194,6 +210,6 @@ python backend/scripts/detect_mistakes.py --session data_lake/clean_data/2023_1_
 python backend/scripts/train_ridge.py
 python backend/scripts/train_lstm.py --cell lstm --force   # and --cell rnn (~16 min each, CPU)
 python backend/scripts/check_strategy.py
-python backend/scripts/predict_strategy.py --session data_lake/clean_data/2024_22_R.parquet --driver 1
+python backend/scripts/predict_strategy.py --session data_lake/clean_data/2024_22_R.parquet --driver 1 --source all
 streamlit run frontend/app.py
 ```

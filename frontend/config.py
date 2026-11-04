@@ -18,6 +18,7 @@ PROCESSED_VIDEO_DIR = PROJECT_ROOT / "data_lake" / "processed_video"
 PROCESSED_CSV_DIR = PROJECT_ROOT / "data_lake" / "processed_csv"
 RACING_LINES_DIR = PROJECT_ROOT / "data_lake" / "racing_lines"
 TYRE_PREDICTIONS_DIR = PROJECT_ROOT / "data_lake" / "tyre_predictions"
+MODELS_DIR = PROJECT_ROOT / "models"
 
 try:
     CACHE_DIR.mkdir(exist_ok=True)
@@ -61,32 +62,4 @@ DRIVER_MAPPING = {
     "63": "George Russell",
     "77": "Valtteri Bottas",
     "81": "Oscar Piastri",
-}
-
-# ── Team mapping ──────────────────────────────────────────────────────────────
-TEAM_MAPPING = {
-    "1":  "Red Bull Racing",
-    "2":  "Williams",
-    "3":  "RB",
-    "4":  "McLaren",
-    "10": "Alpine",
-    "11": "Red Bull Racing",
-    "14": "Aston Martin",
-    "16": "Ferrari",
-    "18": "Aston Martin",
-    "20": "Haas",
-    "21": "AlphaTauri",
-    "22": "RB",
-    "23": "Williams",
-    "24": "Kick Sauber",
-    "27": "Haas",
-    "31": "Alpine",
-    "38": "Ferrari",
-    "40": "RB",
-    "43": "Williams",
-    "44": "Mercedes",
-    "55": "Ferrari",
-    "63": "Mercedes",
-    "77": "Kick Sauber",
-    "81": "McLaren",
 }

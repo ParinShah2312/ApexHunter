@@ -84,6 +84,91 @@ def get_event_schedule(year: int) -> Dict[int, str]:
         return {}
 
 
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
+def get_session_info(year: int, round_num: int, session_type: str) -> dict:
+    """Event and driver facts for one session from FastF1 (cached laps + results).
+
+    Returns {"event", "location", "drivers": {number: {name, abbr, team, color, position}},
+    "fastest_s": {number: seconds}}, or {} when FastF1 is unavailable. position = finishing
+    (race) or qualifying position, None if not classified. Teams come from the
+    session's own results, so a driver who changed team between seasons shows the right one (#55).
+    Fastest laps use FastF1's personal-best laps, so deleted laps (track limits) do not count.
+    """
+    try:
+        session = fastf1.get_session(year, round_num, session_type)
+        session.load(laps=True, telemetry=False, weather=False, messages=False)
+        drivers = {}
+        for _, r in session.results.iterrows():
+            color = str(r.get("TeamColor") or "")
+            drivers[str(r["DriverNumber"])] = {
+                "name": r["FullName"], "abbr": r["Abbreviation"], "team": r["TeamName"],
+                "color": f"#{color}" if len(color) == 6 else "#8a94a6",
+                "position": int(r["Position"]) if pd.notna(r.get("Position")) else None,
+            }
+        laps = session.laps
+        best = laps[laps["IsPersonalBest"].eq(True)].dropna(subset=["LapTime"])
+        fastest = best.groupby("DriverNumber")["LapTime"].min().dt.total_seconds()
+        return {
+            "event": str(session.event["EventName"]),
+            "location": str(session.event["Location"]),
+            "drivers": drivers,
+            "fastest_s": {str(k): float(v) for k, v in fastest.items()},
+        }
+    except Exception:
+        return {}
+
+
+SC_VSC_RED_CODES = set("4567")      # FastF1 track status: 4 SC, 5 red flag, 6/7 VSC
+
+
+def lap_table(laps: pd.DataFrame) -> pd.DataFrame:
+    """FastF1 laps → driver, lap, start_s, lap_s, compound, kind ("pit" | "sc" | "normal"),
+    deleted. Laps without a start or a time are left out. kind "pit" = in- or out-lap; "sc" = run
+    at least partly under a safety car, VSC or red flag."""
+    lap_s = laps["LapTime"].dt.total_seconds()
+    lap_s = lap_s.fillna((laps["Time"] - laps["LapStartTime"]).dt.total_seconds())
+    pit = laps["PitInTime"].notna() | laps["PitOutTime"].notna()
+    sc = laps["TrackStatus"].fillna("").astype(str).map(lambda s: bool(set(s) & SC_VSC_RED_CODES))
+    out = pd.DataFrame({
+        "driver": laps["DriverNumber"].astype(str),
+        "lap": laps["LapNumber"],
+        "start_s": laps["LapStartTime"].dt.total_seconds(),
+        "lap_s": lap_s,
+        "compound": laps["Compound"].fillna("").astype(str),
+        "kind": np.where(pit, "pit", np.where(sc, "sc", "normal")),
+        "deleted": laps["Deleted"].eq(True) if "Deleted" in laps else False,
+    })
+    out = out.dropna(subset=["lap", "start_s", "lap_s"])
+    out["lap"] = out["lap"].astype(int)
+    return out.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
+def get_session_laps(year: int, round_num: int, session_type: str) -> pd.DataFrame:
+    """lap_table for every driver of a session (empty frame if FastF1 is unavailable)."""
+    try:
+        session = fastf1.get_session(year, round_num, session_type)
+        session.load(laps=True, telemetry=False, weather=False, messages=False)
+        return lap_table(session.laps)
+    except Exception:
+        return pd.DataFrame(columns=["driver", "lap", "start_s", "lap_s", "compound", "kind", "deleted"])
+
+
+@st.cache_data(show_spinner=False, ttl=FASTF1_LOOKUP_TTL_S)
+def get_corners(year: int, round_num: int, session_type: str) -> pd.DataFrame:
+    """The circuit's corners from FastF1: label ("T1", "T9a"), X, Y (same 1/10 m units as the
+    telemetry). Empty if FastF1 has no circuit info."""
+    try:
+        session = fastf1.get_session(year, round_num, session_type)
+        session.load(laps=True, telemetry=False, weather=False, messages=False)
+        c = session.get_circuit_info().corners
+        return pd.DataFrame({"label": [f"T{int(n)}{letter if isinstance(letter, str) else ''}"
+                                       for n, letter in zip(c["Number"], c["Letter"])],
+                             "X": c["X"].to_numpy(dtype=float), "Y": c["Y"].to_numpy(dtype=float)})
+    except Exception:
+        return pd.DataFrame(columns=["label", "X", "Y"])
+
+
 @st.cache_data(show_spinner="Loading telemetry...")
 
 
@@ -192,19 +277,6 @@ def load_turn_windows(filepath: str) -> Optional[List[dict]]:
         return json.load(f)["turns"]
 
 
-def load_video_lap(filepath: str) -> Optional[dict]:
-    """Return the lap a processed video shows (year, round, session, driver_number, lap_start_s,
-    lap_end_s) plus "video_offset_s", from the turn windows JSON; None if it isn't recorded
-    (files written before #35)."""
-    if not Path(filepath).exists():
-        return None
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if "lap" not in data:
-        return None
-    return {**data["lap"], "video_offset_s": data.get("video_offset_s", 0.0)}
-
-
 def downsample(df: pd.DataFrame, max_points: int = 5000) -> pd.DataFrame:
     """Intelligently downsamples a DataFrame for chart rendering performance.
 
@@ -243,7 +315,8 @@ def load_racing_line(filepath: str) -> Optional[dict]:
 
 
 def load_tyre_prediction(filepath: str) -> Optional[dict]:
-    """Load a tyre prediction JSON. Returns None if file does not exist."""
+    """Load a tyre prediction JSON. Returns None if the file does not exist or cannot be read
+    (tyre_prediction_unreadable tells the two apart)."""
     if not Path(filepath).exists():
         return None
     try:
@@ -251,3 +324,9 @@ def load_tyre_prediction(filepath: str) -> Optional[dict]:
             return json.load(f)
     except Exception:
         return None
+
+
+def tyre_prediction_unreadable(filepath: str) -> bool:
+    """True if the strategy file exists but is not valid JSON: it used to be shown as "no pit
+    window for this driver" (the same as a missing file)."""
+    return Path(filepath).exists() and load_tyre_prediction(filepath) is None

@@ -1,16 +1,15 @@
 """
 ApexHunter Frontend - Sidebar
-Renders all sidebar filters, AI model status indicators,
-and returns the user's selections.
+Season switch → Grand Prix → session switch → driver, then badges saying whether model results
+exist for the chosen driver. Returns the selections.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import pandas as pd
 import streamlit as st
-
 
 from config import (
     AVAILABLE_YEARS,
@@ -21,17 +20,21 @@ from config import (
     RACING_LINES_DIR,
     TYRE_PREDICTIONS_DIR,
 )
-from components.data_loader import get_event_schedule, load_session_data
+from components.data_loader import get_event_schedule, get_session_info, load_session_data
+
+# Opens on a session that has both mistake and pit-window results
+DEFAULT_YEAR, DEFAULT_ROUND, DEFAULT_SESSION, DEFAULT_DRIVER = 2023, 1, "R", "1"
+SESSION_ORDER = ("Q", "R")
 
 
 @dataclass
-
-
 class SidebarSelections:
     """Container for all sidebar filter selections."""
 
     year: int
-    session_label: str
+    round_num: int
+    session_type: str
+    event_name: str
     driver_number: str
     driver_name: str
     df_driver: pd.DataFrame
@@ -41,75 +44,22 @@ class SidebarSelections:
     racing_line_path: str
     tyre_prediction_path: str
     df_full: pd.DataFrame
+    session_info: dict
 
 
-def _build_session_options(
-    available_files: List[Path], event_names: Dict[int, str]
-) -> Tuple[List[str], Dict[str, Path]]:
-    """Builds sorted, human-readable session labels from parquet filenames."""
-    session_options: List[str] = []
-    file_mapping: Dict[str, Path] = {}
-
-    for f in available_files:
+def session_files(year: int) -> Dict[int, Dict[str, Path]]:
+    """{round: {session code: clean_data file}} for one season, from the file names."""
+    rounds: Dict[int, Dict[str, Path]] = {}
+    for f in DATA_LAKE_DIR.glob(f"{year}_*.parquet"):
         parts = f.stem.split("_")
-        if len(parts) == 3:
-            _year, round_num, session_type = parts
-            event_name = event_names.get(int(round_num), "Unknown Race")
-            full_session = SESSION_LABEL_MAP.get(session_type, session_type)
-            label = f"Round {round_num}: {event_name} - {full_session}"
-        else:
-            label = f.stem
-        session_options.append(label)
-        file_mapping[label] = f
-
-    def _round_key(x: str) -> int:
-        try:
-            if "Round " in x:
-                return int(x.split("Round ")[1].split(":")[0])
-        except (ValueError, IndexError):
-            pass
-
-        return 999
-
-    session_options.sort(key=_round_key)
-    return session_options, file_mapping
-
-
-def _build_driver_options(df: pd.DataFrame) -> List[str]:
-    """Builds a sorted list of 'Name (#Number)' labels for the driver selectbox."""
-    available_numbers = sorted(df["Driver"].dropna().astype(str).unique())
-    driver_list = [
-        (
-            DRIVER_MAPPING.get(d, "Unknown Driver"),
-            f"{DRIVER_MAPPING.get(d, 'Unknown Driver')} (#{d})",
-        )
-        for d in available_numbers
-    ]
-    driver_list.sort(key=lambda x: x[0])
-    return [label for _, label in driver_list]
-
-
-def _get_default_index(key: str, options: list) -> int:
-    """Returns the saved index from session_state, or 0 if not found or out of range."""
-    saved = st.session_state.get(key)
-    if saved is not None and saved in options:
-        return options.index(saved)
-    return 0
-
-
-_DOT_GREEN: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#00ff88;box-shadow:0 0 5px #00ff88;margin-right:6px"></span>'
-_DOT_GRAY: str = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3a4558;margin-right:6px"></span>'
-
-
-def _status_dot(is_active: bool) -> str:
-    """Returns the HTML span string for a green or gray dot."""
-    return _DOT_GREEN if is_active else _DOT_GRAY
+        if len(parts) == 3 and parts[1].isdigit():
+            rounds.setdefault(int(parts[1]), {})[parts[2]] = f
+    return dict(sorted(rounds.items()))
 
 
 def _derive_output_paths(session_filepath: str, driver_number: str) -> Dict[str, str]:
     """Derives output paths for models based on the session and driver."""
-    stem = Path(session_filepath).stem
-    output_stem = f"{stem}_{driver_number}"
+    output_stem = f"{Path(session_filepath).stem}_{driver_number}"
     return {
         "mistake_parquet": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet"),
         "mistake_meta": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json"),
@@ -118,108 +68,101 @@ def _derive_output_paths(session_filepath: str, driver_number: str) -> Dict[str,
     }
 
 
+def _badge(label: str, ok: bool) -> str:
+    color, mark = ("#2ecc71", "✓") if ok else ("#5b6577", "✗")
+    return (f'<span style="display:inline-block;margin:0 6px 6px 0;padding:3px 10px;border-radius:12px;'
+            f'border:1px solid {color};color:{color};font-size:0.8rem">{label} {mark}</span>')
+
+
+def _init_default(key: str, value) -> None:
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
 def render_sidebar() -> SidebarSelections:
     """Renders the full sidebar and returns user selections + filtered DataFrame."""
+    sb = st.sidebar
+    sb.markdown("### ApexHunter")
 
-    # ── Filters ───────────────────────────────────────────────────────────
-    st.sidebar.markdown("### Filter Data")
+    _init_default("sel_year", DEFAULT_YEAR)
+    year = sb.segmented_control("Season", AVAILABLE_YEARS, key="sel_year", required=True)
 
-    # Year
-    year_idx = _get_default_index("sel_year", AVAILABLE_YEARS)
-    selected_year = st.sidebar.selectbox(
-        "Year", AVAILABLE_YEARS, index=year_idx, key="sel_year", filter_mode=None
-    )
-
-    available_files = list(DATA_LAKE_DIR.glob(f"{selected_year}_*.parquet"))
-    if not available_files:
-        st.error(f"No data files found for {selected_year} in {DATA_LAKE_DIR}.")
+    rounds = session_files(year)
+    if not rounds:
+        st.error(f"No data files found for {year} in {DATA_LAKE_DIR}.")
         st.stop()
-
-    event_names = get_event_schedule(selected_year)
-    session_options, file_mapping = _build_session_options(available_files, event_names)
-
-    # Session
-    session_idx = _get_default_index("sel_session", session_options)
-    selected_session = st.sidebar.selectbox(
-        "Session", session_options, index=session_idx, key="sel_session", filter_mode=None
+    names = get_event_schedule(year)
+    round_options = list(rounds)
+    _init_default("sel_round", DEFAULT_ROUND)
+    if st.session_state["sel_round"] not in round_options:       # e.g. round 24 → 2023
+        st.session_state["sel_round"] = round_options[0]
+    round_num = sb.selectbox(
+        "Grand Prix", round_options, key="sel_round", filter_mode=None,
+        format_func=lambda r: f"R{r:02d} · {names.get(r, 'Round ' + str(r))}",
     )
 
-    session_filepath = str(file_mapping[selected_session])
+    codes = [c for c in SESSION_ORDER if c in rounds[round_num]]
+    _init_default("sel_session_type", DEFAULT_SESSION)
+    if st.session_state["sel_session_type"] not in codes:
+        st.session_state["sel_session_type"] = codes[-1]
+    session_type = sb.segmented_control(
+        "Session", codes, key="sel_session_type", required=True,
+        format_func=lambda c: SESSION_LABEL_MAP.get(c, c),
+    )
+
+    session_filepath = str(rounds[round_num][session_type])
     try:
         df = load_session_data(session_filepath)
     except Exception as e:
         st.error(f"Error loading data: {e}")
         st.stop()
 
-    # Driver
-    driver_labels = _build_driver_options(df)
-    if not driver_labels:
+    info = get_session_info(year, round_num, session_type)
+    drivers_info = info.get("drivers", {})
+
+    def driver_name(num: str) -> str:
+        return drivers_info.get(num, {}).get("name") or DRIVER_MAPPING.get(num, f"Car #{num}")
+
+    driver_options = sorted(df["Driver"].dropna().astype(str).unique(), key=driver_name)
+    if not driver_options:
         st.error("No drivers found in this session.")
         st.stop()
-
-    driver_idx = _get_default_index("sel_driver", driver_labels)
-    selected_driver_label = st.sidebar.selectbox(
-        "Driver", driver_labels, index=driver_idx, key="sel_driver", filter_mode=None
+    _init_default("sel_driver_number", DEFAULT_DRIVER)
+    if st.session_state["sel_driver_number"] not in driver_options:
+        st.session_state["sel_driver_number"] = driver_options[0]
+    driver_number = sb.selectbox(
+        "Driver", driver_options, key="sel_driver_number", filter_mode=None,
+        format_func=lambda n: f"{driver_name(n)} · {drivers_info.get(n, {}).get('team', f'#{n}')}",
     )
 
-    if selected_driver_label is None:
-        st.error("Please select a driver.")
-        st.stop()
-
-    driver_number = selected_driver_label.split(" (#")[1].replace(")", "")
-    driver_name = selected_driver_label.split(" (#")[0]
-
-    # Filter primary driver
     df_driver = df[df["Driver"].astype(str) == driver_number].copy()
-
-    # ── Derive mistake file paths ─────────────────────────────────────────
     paths = _derive_output_paths(session_filepath, driver_number)
-    mistake_parquet_path = paths["mistake_parquet"]
-    mistake_meta_path = paths["mistake_meta"]
-    racing_line_json = paths["racing_line"]
-    tyre_prediction_path = paths["tyre_prediction"]
 
-    # ── AI Models Status ──────────────────────────────────────────────────
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**AI Models**")
-
-
-    # Isolation Forest
-    has_iso = Path(mistake_parquet_path).exists()
-    st.sidebar.markdown(
-        f"{_status_dot(has_iso)} Isolation Forest",
+    # ── Results badges ────────────────────────────────────────────────────
+    sb.markdown("---")
+    sb.markdown("**Results for this driver**")
+    sb.markdown(
+        _badge("Mistakes", Path(paths["mistake_parquet"]).exists())
+        + _badge("Pit window", Path(paths["tyre_prediction"]).exists()),
         unsafe_allow_html=True,
     )
 
-    # Tyre pace + pit window (predict_strategy.py)
-    strategy_exists = Path(tyre_prediction_path).exists()
-    st.sidebar.markdown(
-        f"{_status_dot(strategy_exists)} Tyre Pace + Pit Window",
-        unsafe_allow_html=True,
-    )
-
-    # A* Racing Line
-    astar_exists = Path(racing_line_json).exists()
-    st.sidebar.markdown(
-        f"{_status_dot(astar_exists)} A* Racing Line",
-        unsafe_allow_html=True,
-    )
-
-
-    # ── Footer ────────────────────────────────────────────────────────────
-    st.sidebar.markdown("---")
-    st.sidebar.caption("ApexHunter v2.0 · Parin Shah · 23001091")
+    sb.markdown("---")
+    sb.caption("ApexHunter · Parin Shah · 23001091")
 
     return SidebarSelections(
-        year=selected_year,
-        session_label=selected_session,
+        year=year,
+        round_num=round_num,
+        session_type=session_type,
+        event_name=info.get("event") or names.get(round_num, f"Round {round_num}"),
         driver_number=driver_number,
-        driver_name=driver_name,
+        driver_name=driver_name(driver_number),
         df_driver=df_driver,
         session_filepath=session_filepath,
-        mistake_parquet_path=mistake_parquet_path,
-        mistake_meta_path=mistake_meta_path,
-        racing_line_path=str(racing_line_json),
-        tyre_prediction_path=tyre_prediction_path,
+        mistake_parquet_path=paths["mistake_parquet"],
+        mistake_meta_path=paths["mistake_meta"],
+        racing_line_path=paths["racing_line"],
+        tyre_prediction_path=paths["tyre_prediction"],
         df_full=df,
+        session_info=info,
     )

@@ -3,12 +3,16 @@ ApexHunter Frontend - Racing Line
 Renders the racing line analysis tab with algorithm path overlays,
 track boundary polygons, and per-corner deviation charts.
 """
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+from config import DRIVER_MAPPING, RACING_LINES_DIR, SESSION_LABEL_MAP
+
+ALGO_NAMES = {"astar": "A* Search", "dijkstra": "Dijkstra", "bfs": "BFS"}
 
 ALGO_COLORS = {
     "astar": "#a855f7",     # purple
@@ -263,44 +267,20 @@ def render_racing_line(
     driver_number: str,
     df_full: Optional[pd.DataFrame] = None
 ) -> None:
-    """
-    Step 1 of the new UI build:
-    Perfect Track Boundaries. We calculate normal vectors to plot a physical track
-    polygon that won't overlap when zoomed out.
-    """
-    st.header("Racing Line Analysis")
+    """Racing line: the driver's own line and the A* / Dijkstra / BFS path through a grid made from
+    his laps, plus the distance between them at each corner."""
+    st.markdown("#### Racing line search")
+    algo_key = st.segmented_control("Algorithm", list(ALGO_NAMES), default="astar", required=True,
+                                    key="rl_algo", format_func=ALGO_NAMES.get)
+    selected_algo = ALGO_NAMES[algo_key]
 
-    # ── Algorithm Selection ───────────────────────────────────────────────────
-    selected_algo = st.radio("Select Algorithm", ["A* Search", "Dijkstra", "BFS"], horizontal=True)
-    if selected_algo == "A* Search":
-        algo_key = "astar"
-    elif selected_algo == "Dijkstra":
-        algo_key = "dijkstra"
-    else:
-        algo_key = "bfs"
-
-    if not racing_line_data:
-        st.warning(
-            "No optimal racing line output found for this session and driver.\n\n"
-            "Run: `python backend/scripts/optimal_line.py --session <path> --driver <code>`"
-        )
-        return
-
-    pts = np.array(racing_line_data.get("driver_path", []))
-    if len(pts) == 0:
-        st.warning(
-            "No optimal racing line output found for this session and driver.\n\n"
-            "Run: `python backend/scripts/optimal_line.py --session <path> --driver <code>`"
-        )
-        return
-
-    algo_data = racing_line_data.get("algorithms", {}).get(algo_key, {})
-
-    if not algo_data or not algo_data.get("found"):
-        st.warning(
-            "No optimal racing line output found for this session and driver.\n\n"
-            "Run: `python backend/scripts/optimal_line.py --session <path> --driver <code>`"
-        )
+    pts = np.array((racing_line_data or {}).get("driver_path", []))
+    algo_data = (racing_line_data or {}).get("algorithms", {}).get(algo_key, {})
+    if len(pts) == 0 or not algo_data or not algo_data.get("found"):
+        available = racing_lines_available()
+        st.info("No racing line for this session and driver. It exists for: "
+                + ("; ".join(available) if available else "none yet") + ". Make one with "
+                "`python backend/scripts/optimal_line.py --session <path> --driver <number>`.")
         return
 
     fig = _build_racing_line_figure(racing_line_data, algo_key, selected_algo, driver_number)
@@ -308,8 +288,19 @@ def render_racing_line(
 
     # ── Corner Deviation Chart ────────────────────────────────────────────────
     if len(pts) >= 65:
-        st.markdown(f"### Corner-by-Corner Deviation ({selected_algo})")
+        st.markdown(f"##### Corner by corner: distance from the {selected_algo} line")
         st.caption(f"Physical distance between the driver's path and the {selected_algo} line at each specific turn apex.")
 
         dev_fig = _build_deviation_chart(racing_line_data, algo_key)
         st.plotly_chart(dev_fig, width="stretch")
+
+
+def racing_lines_available() -> List[str]:
+    """'2023 R1 Qualifying, Max Verstappen' for every saved racing line."""
+    out = []
+    for f in sorted(RACING_LINES_DIR.glob("*_racing_line.json")) if RACING_LINES_DIR.exists() else []:
+        parts = f.name.split("_")
+        if len(parts) >= 4 and parts[0].isdigit() and parts[1].isdigit():
+            out.append(f"{parts[0]} R{parts[1]} {SESSION_LABEL_MAP.get(parts[2], parts[2])}, "
+                       f"{DRIVER_MAPPING.get(parts[3], '#' + parts[3])}")
+    return out

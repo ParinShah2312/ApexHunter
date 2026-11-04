@@ -81,8 +81,11 @@ python backend/scripts/detect_mistakes.py --session data_lake/clean_data/2023_1_
 
 `data_lake/mistake_data/{session}_{driver}_mistakes.parquet` (samples with features, scores, flags,
 event ids), `_events.json` (events, most costly first) and `_meta.json` (settings, scores; with
-`--compare`, all three detectors). About 2 minutes per race with `--compare`. Outputs exist for the
-four sessions above. The AI tab shows the events on a track map and in a table.
+`--compare`, all three detectors). With `--compare` the Z-score's and autoencoder's own flags and
+events are saved too (`z_flag`/`ae_flag`, `z_event_id`/`ae_event_id`; `"detectors"` in the events
+file, with the same reason, location and time lost). About 2 minutes per race with `--compare`.
+Outputs exist for the four sessions above. The Driver Mistakes tab shows each detector's events on
+a track map and in a list, the chosen one against the field, and the comparison charts.
 
 ## 6. Decisions
 

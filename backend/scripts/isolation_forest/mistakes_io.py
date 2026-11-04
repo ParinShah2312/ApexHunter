@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -229,6 +229,7 @@ def save_outputs(
     output_dir: Path,
     output_stem: str,
     logger: logging.Logger,
+    other_events: Optional[Dict[str, List[dict]]] = None,
 ) -> Tuple[Path, Path]:
     """Save the annotated parquet, metadata JSON and events JSON (most severe event first).
 
@@ -239,6 +240,8 @@ def save_outputs(
         output_dir: Directory to write into.
         output_stem: Base name for the output files.
         logger: Logger instance.
+        other_events: With --compare, the Z-score's and autoencoder's own events
+            ({"z_score": [...], "lstm_autoencoder": [...]}), saved under "detectors".
 
     Returns:
         Tuple of (parquet_path, json_path).
@@ -255,8 +258,11 @@ def save_outputs(
 
     events_path = output_dir / f"{output_stem}_mistakes_events.json"
     with open(events_path, "w", encoding="utf-8") as f:
-        json.dump({"session_file": meta["session_file"], "driver": meta["driver"],
-                   "n_events": len(events), "events": events}, f, indent=2)
+        out = {"session_file": meta["session_file"], "driver": meta["driver"],
+               "n_events": len(events), "events": events}
+        if other_events:
+            out["detectors"] = other_events
+        json.dump(out, f, indent=2)
     logger.info(f"Saved events JSON: {events_path} ({len(events)} events)")
 
     return parquet_path, json_path

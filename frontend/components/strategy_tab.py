@@ -1,141 +1,33 @@
 """
-ApexHunter Frontend - AI Analysis
-Renders the AI Analysis tab: Isolation Forest mistake events (left) and the tyre pace / pit window
-output of predict_strategy.py (right). Both are minimal views to check the models; the full design
-comes with the UI redesign (ROADMAP §E).
+ApexHunter Frontend - Tyres & Pit Window tab
+Model switch (Ridge / RNN / LSTM; opens on the one with the best pit-window margin) -> stint buttons -> cards -> the stint's lap
+times with the pit window (green), safety-car laps (yellow), best and real stop, the predicted lap
+times -> how the models compare (lap-time error on the test races, pit window vs a random window).
+Reads predict_strategy.py --source all outputs (*_strategy.json) and the tyre models' configs.
 """
 
-from typing import List, Optional, Tuple
+import json
+from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import DRIVER_MAPPING
-from components.data_loader import downsample
-
-
-
-def mistake_rate_pct(df: pd.DataFrame) -> float:
-    """Measured share of rows flagged as mistakes, in percent (0.0 for an empty frame).
-
-    This is the model's actual output rate. It is NOT the contamination hyperparameter, which is
-    only the threshold setting chosen during training.
-    """
-    if len(df) == 0:
-        return 0.0
-    return float(df["is_mistake"].sum()) / len(df) * 100
-
-
-def _time_lost_text(event: dict) -> str:
-    """'+0.18 s' (time lost vs the driver's own nearby laps), or 'n/a'."""
-    lost = event.get("time_lost_s")
-    return "n/a" if lost is None else f"{lost:+.2f} s"
-
-
-def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: Optional[dict],
-                                    events: Optional[List[dict]] = None) -> None:
-    """Render the Isolation Forest card: track map with one marker per mistake event, counts,
-    and all events with their reasons, most costly first. Minimal version to check the rework; the
-    full design comes with the UI redesign (ROADMAP §E)."""
-    if df_mistakes is None or meta is None:
-        st.warning(
-            "No Isolation Forest output found for this session and driver.\n\n"
-            "Run: `python backend/scripts/detect_mistakes.py --session <path> --driver <code>`"
-        )
-        return
-    has_event_list = events is not None
-    events = events or []
-
-    contamination = meta["best_contamination"]
-    total_mistakes = int(df_mistakes["is_mistake"].sum())
-    session_rate = mistake_rate_pct(df_mistakes)
-    ref_names = ", ".join(DRIVER_MAPPING.get(d, d) for d in meta["reference_drivers"])
-
-    st.markdown("**ISOLATION FOREST · Mistake Detection**")
-    st.caption(
-        f"Session: {len(events)} events from {total_mistakes} flagged samples "
-        f"({session_rate:.2f}% of samples) · contamination setting={contamination:.3f} · "
-        f"field reference: {ref_names}"
-    )
-
-    # Lap selector — filter events to a single lap
-    df_display, lap_events = df_mistakes, events
-    if "LapNumber" in df_mistakes.columns:
-        available_laps = sorted(df_mistakes[df_mistakes["LapNumber"] > 0]["LapNumber"].unique())
-        if available_laps:
-            lap_options = [f"Lap {lap}" for lap in available_laps]
-            selected_lap_label = st.selectbox(
-                "Select Lap", lap_options, key="ai_mistake_lap_selector", filter_mode=None
-            )
-            selected_lap = available_laps[lap_options.index(selected_lap_label)]
-            df_display = df_mistakes[df_mistakes["LapNumber"] == selected_lap]
-            lap_events = [e for e in events if e["lap"] == selected_lap]
-
-    # Track map — full track background in neutral blue, one marker per event of the selected lap
-    fig_map = go.Figure()
-    df_map = downsample(df_mistakes, max_points=8000)
-    fig_map.add_trace(
-        go.Scattergl(
-            x=df_map["X"], y=df_map["Y"], mode="markers",
-            marker=dict(color="#3abdc7", size=3, opacity=0.5),
-            showlegend=False, hovertemplate="X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-        )
-    )
-    if lap_events:
-        fig_map.add_trace(
-            go.Scatter(
-                x=[e["x"] for e in lap_events], y=[e["y"] for e in lap_events], mode="markers",
-                marker=dict(symbol="x", size=10, color="#ff3a3a"), name="Mistake event",
-                text=[f"#{e['rank']} · {e.get('location', '')} · {e['reason']} · {_time_lost_text(e)}"
-                      for e in lap_events],
-                hovertemplate="%{text}<extra></extra>",
-            )
-        )
-    fig_map.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#0d1520",
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=""),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title="", scaleanchor="x", scaleratio=1),
-        margin=dict(t=10, b=10, l=10, r=10),
-        showlegend=True,
-        height=300,
-    )
-    st.plotly_chart(fig_map, width='stretch')
-
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.metric("Events (lap)", str(len(lap_events)))
-    with s2:
-        st.metric("Flagged Samples (lap)", str(int(df_display["is_mistake"].sum())))
-    with s3:
-        st.metric("Mistake Rate", f"{mistake_rate_pct(df_display):.2f}%")
-
-    if events:
-        st.markdown(f"**All {len(events)} events, most costly first "
-                    f"(time lost vs the driver's own nearby laps)**")
-        top = pd.DataFrame(events)
-        if "location" not in top.columns:                   # outputs from before the corner labels
-            top["location"] = top["track_pos_m"].map(lambda m: f"{m:.0f} m into the lap")
-        top["time_lost"] = [_time_lost_text(e) for e in events]
-        top["why"] = [e["reason"] + (f" ({e['saving_note']})" if e.get("saving_note") else "")
-                      for e in events]
-        st.dataframe(
-            top[["rank", "lap", "location", "time_lost", "why"]].rename(columns={
-                "rank": "#", "lap": "Lap", "location": "Location", "time_lost": "Time lost",
-                "why": "Why it was flagged"}),
-            hide_index=True, width="stretch",
-        )
-    elif has_event_list:
-        st.info("No mistake events in this session: no run of flags lasted 0.5 s or more.")
-    else:
-        st.info("No event list for this output. Re-run detect_mistakes.py with --force.")
-
+from config import MODELS_DIR, TYRE_PREDICTIONS_DIR
 
 SOURCE_NAMES = {"no_change": '"No change" (fuel only)', "laps_driven": "Laps driven (real lap times)",
                 "ridge": "Ridge", "rnn": "RNN", "lstm": "LSTM"}
+SOURCE_SHORT = {"no_change": "No change", "laps_driven": "Laps driven", "ridge": "Ridge", "rnn": "RNN",
+                "lstm": "LSTM"}
+SOURCE_KIND = {"no_change": "baseline", "laps_driven": "rule", "ridge": "ML", "rnn": "DL", "lstm": "DL"}
+SOURCE_COLORS = {"no_change": "#8a94a6", "laps_driven": "#2ec4b6", "ridge": "#4f8fe0", "rnn": "#e07bb5",
+                 "lstm": "#b45cff"}
+# The tab shows the three trained models only (user, 2026-11-05); "no change" and "laps driven"
+# stay in the outputs, check_strategy.py and the docs.
+MODEL_ORDER = ["ridge", "rnn", "lstm"]
+MODEL_CONFIGS = {"ridge": "tyre_ridge_config.json", "rnn": "tyre_rnn_config.json", "lstm": "tyre_config.json"}
 WINDOW_COLOUR = "rgba(0,255,136,0.13)"
 NEUTRAL_COLOUR = "rgba(255,200,0,0.16)"
+PLOT_BG, GRID = "#0f1217", "rgba(255,255,255,0.05)"
 
 
 def lap_runs(laps: List[int]) -> List[Tuple[int, int]]:
@@ -186,7 +78,8 @@ def _build_strategy_figure(data: dict, stint: dict) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=[r["lap"] for r in rows], y=[r["lap_time"] if r in racing else None for r in rows],
         mode="lines+markers", line=dict(color="#e2e8f0", width=2), marker=dict(size=4),
-        name="Real lap time", hovertemplate="Lap %{x}: %{y:.2f} s<extra></extra>", connectgaps=False))
+        name="Real lap time", hovertemplate="Lap %{x}: real lap time %{y:.2f} s<extra></extra>",
+        connectgaps=False))
     # lap 1, out-lap, in-lap and SC/VSC laps: grey markers, held at the top edge if off the chart
     other = [r for r in rows if r not in racing and r["lap_time"] is not None]
     if other:
@@ -195,12 +88,13 @@ def _build_strategy_figure(data: dict, stint: dict) -> go.Figure:
             y=[min(r["lap_time"], top) if top else r["lap_time"] for r in other],
             mode="markers", marker=dict(color="#6b7890", size=6, symbol="circle-open"),
             name="Lap 1 / pit / SC lap", text=[f"{r['lap_time']:.2f} s" for r in other],
-            hovertemplate="Lap %{x}: %{text}<extra></extra>"))
+            hovertemplate="Lap %{x}: %{text} (lap 1, pit or safety-car lap)<extra></extra>"))
     pred = [r for r in rows if r["predicted_lap_time"] is not None]
     if pred:
         fig.add_trace(go.Scatter(
             x=[r["lap"] for r in pred], y=[r["predicted_lap_time"] for r in pred], mode="markers",
-            marker=dict(color="#a855f7", size=6, symbol="diamond"), name=f"Predicted ({SOURCE_NAMES.get(data['model'], data['model'])})",
+            marker=dict(color=SOURCE_COLORS.get(data["model"], "#a855f7"), size=7, symbol="diamond"),
+            name=f"Predicted by {SOURCE_SHORT.get(data['model'], data['model'])}",
             hovertemplate="Lap %{x}: predicted %{y:.2f} s<extra></extra>"))
     best = stint.get("best_lap")
     if best and first <= best <= last:
@@ -212,88 +106,179 @@ def _build_strategy_figure(data: dict, stint: dict) -> go.Figure:
                       annotation_text=f"Pitted {stint['actual_stop']}", annotation_position="top right",
                       annotation_font=dict(color="#ff3a3a", size=10))
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#0d1520", height=300,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor=PLOT_BG, height=380,
         margin=dict(t=25, b=30, l=50, r=20), yaxis=yaxis,
         xaxis=dict(title="Race lap", range=[first - 0.5, last + 0.5], tickfont=dict(color="#6b7890"),
                    gridcolor="rgba(255,255,255,0.04)"),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6b7890", size=11), orientation="h", y=-0.25),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#8a94a6", size=11), orientation="h", y=-0.22),
     )
     return fig
 
 
-def _render_strategy_column(data: Optional[dict]) -> None:
-    """Tyre pace + pit window card (ROADMAP §C step 8): stint chart with the window (green),
-    safety-car/VSC laps (yellow), best and real stop, the readable summary and a few numbers."""
-    st.markdown("**TYRE PACE · PIT WINDOW**")
-    if data is None:
-        st.warning(
-            "No pit strategy output for this session and driver.\n\n"
-            "Run (races only; `check_strategy.py` must have been run once, it picks the wear source):\n"
-            "```\npython backend/scripts/predict_strategy.py "
-            "--session data_lake/clean_data/<file>.parquet --driver <number>\n```")
-        return
-    cost = data["pit_cost"]
-    trained = {True: " · race was in the model's training data", False: " · held-out test race"}
-    st.caption(
-        f"Wear from: {SOURCE_NAMES.get(data['model'], data['model'])}"
-        + trained.get(data.get("in_training_data"), "")
-        + f" · pit stop costs {cost['normal_s']:.1f} s ({cost['sc_vsc_s']:.1f} s under SC/VSC)")
-    scores = data.get("strategy_scores")
-    if scores:
-        table = pd.DataFrame([
-            {"Wear from": SOURCE_NAMES.get(k, k) + (" (shown)" if k == data["model"] else ""),
-             "Real stop in window": f"{v['hit_pct']:.0f} %", "Random 5-lap window": f"{v['random_pct']:.0f} %",
-             "Margin": round(v["hit_pct"] - v["random_pct"], 1)}
-            for k, v in scores.items()]).sort_values("Margin", ascending=False)
-        with st.expander("Pit window scores on the test races (best margin is shown)"):
-            st.dataframe(table, hide_index=True, width="stretch")
+def default_model(data: dict, available: List[str]) -> str:
+    """The trained model with the largest pit-window margin over a random window on the test
+    races (strategy_check.json scores in the file); the first available one without scores."""
+    scores = data.get("strategy_scores") or {}
+    scored = [m for m in available if m in scores]
+    if not scored:
+        return available[0]
+    return max(scored, key=lambda m: scores[m]["hit_pct"] - scores[m]["random_pct"])
 
-    stints = data.get("stints", [])
+
+def normal_window(stint: dict) -> List[int]:
+    """The stint's normal pit window: the run of window laps around the best stop lap (the window
+    list also holds safety-car "pit now" laps, which the summary lists separately)."""
+    runs = lap_runs(stint.get("window", []))
+    best = stint.get("best_lap")
+    run = next((r for r in runs if best is not None and r[0] <= best <= r[1]), None)   # none: SC call only
+    return [] if run is None else list(range(run[0], run[1] + 1))
+
+
+def source_view(data: dict, source: str) -> Optional[dict]:
+    """The output for one wear source: the file's top part for the best source, else its entry under
+    "sources" (predict_strategy.py --source all). None if the file has not got it."""
+    if source == data.get("model"):
+        return data
+    entry = data.get("sources", {}).get(source)
+    return None if entry is None else {**data, **entry}
+
+
+def lap_time_error(view: dict) -> Optional[float]:
+    """Average |predicted - real| lap time (s) over the laps that have a prediction (model sources
+    only; equal to the error of the predicted change, as both start from the previous lap)."""
+    errs = [abs(r["predicted_lap_time"] - r["lap_time"]) for r in view["laps"]
+            if r.get("predicted_lap_time") is not None and r.get("lap_time") is not None]
+    return sum(errs) / len(errs) if errs else None
+
+
+@st.cache_data(show_spinner=False)
+def test_errors() -> Dict[str, float]:
+    """Lap-time error (MAE, s) of each model on the held-out test races, from the model configs."""
+    out = {}
+    for name, fname in MODEL_CONFIGS.items():
+        try:
+            with open(MODELS_DIR / fname, encoding="utf-8") as f:
+                metrics = json.load(f)["metrics"]
+        except (OSError, KeyError, ValueError):
+            continue
+        out[name] = metrics["test"]["mae_s"]
+        out.setdefault("no_change", metrics["test_no_change"]["mae_s"])
+    return out
+
+
+def races_with_results() -> List[str]:
+    """'2023 R1' style list of the races that have pit-window outputs."""
+    races = {tuple(int(x) for x in f.name.split("_")[:2])
+             for f in TYRE_PREDICTIONS_DIR.glob("*_*_R_*_strategy.json")}
+    return [f"{y} R{r}" for y, r in sorted(races)]
+
+
+def _comparison_figures(data: dict) -> Tuple[go.Figure, go.Figure]:
+    errors = test_errors()
+    order = [n for n in MODEL_ORDER if n in errors]
+    err = go.Figure(go.Bar(
+        x=[SOURCE_SHORT[n] for n in order], y=[errors[n] for n in order],
+        marker_color=[SOURCE_COLORS[n] for n in order], text=[f"{errors[n]:.3f} s" for n in order],
+        textposition="outside", hovertemplate="%{x}: average error %{y:.3f} s per lap<extra></extra>"))
+    hi = max((errors[n] for n in order), default=1.0)
+    err.update_layout(height=300, margin=dict(t=20, b=30, l=50, r=10), paper_bgcolor="rgba(0,0,0,0)",
+                      plot_bgcolor=PLOT_BG, font=dict(color="#8a94a6", size=11), showlegend=False,
+                      yaxis=dict(title="Seconds per lap", gridcolor=GRID, range=[0, hi * 1.15]))
+    scores = data.get("strategy_scores") or {}
+    names = [n for n in MODEL_ORDER if n in scores]
+    labels = [SOURCE_SHORT[n] for n in names]
+    hit = go.Figure()
+    hit.add_trace(go.Bar(x=labels, y=[scores[n]["hit_pct"] for n in names], name="Real stop inside the window",
+                         marker_color=[SOURCE_COLORS[n] for n in names],
+                         text=[f"{scores[n]['hit_pct']:.0f} %" for n in names], textposition="outside",
+                         hovertemplate="%{x}: real stop inside the window %{y:.0f} % of the time<extra></extra>"))
+    hit.add_trace(go.Bar(x=labels, y=[scores[n]["random_pct"] for n in names], name="Random window, same size",
+                         marker_color="#3a4252", text=[f"{scores[n]['random_pct']:.0f} %" for n in names],
+                         textposition="outside",
+                         hovertemplate="%{x}: random window %{y:.0f} % of the time<extra></extra>"))
+    hit.update_layout(barmode="group", height=300, margin=dict(t=20, b=30, l=50, r=10),
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor=PLOT_BG, font=dict(color="#8a94a6", size=11),
+                      legend=dict(orientation="h", y=1.15, x=0),
+                      yaxis=dict(title="% of stints", gridcolor=GRID, range=[0, 60]))
+    return err, hit
+
+
+def render_strategy_tab(data: Optional[dict], ctx: str = "") -> None:
+    """Renders the Tyres & Pit Window tab (data = the *_strategy.json output; ctx makes the widget
+    keys unique per session and driver)."""
+    if data is None:
+        st.info("No pit window for this driver in this session. Pit windows are made for races only; "
+                "they exist for: " + ", ".join(races_with_results()) + " (every driver).")
+        return
+    available = [m for m in MODEL_ORDER if source_view(data, m) is not None]
+    if not available:                       # an older file with one rule-based source only
+        available = [data["model"]]
+    default = default_model(data, available)
+    model_key = f"tyre_model_{ctx}"
+    if st.session_state.get(model_key) not in available:
+        st.session_state[model_key] = default
+    source = st.segmented_control(
+        "Tyre model", available, key=model_key, required=True,
+        format_func=lambda m: f"{SOURCE_SHORT.get(m, m)} ({SOURCE_KIND.get(m, '')})")
+    view = source_view(data, source)
+
+    stints = view.get("stints", [])
     if not stints:
         st.warning("The output file has no stints.")
         return
-    labels = [f"Stint {s['stint']} · {s['compound']} · laps {s['first_lap']}-{s['last_lap']}" for s in stints]
-    stint = stints[labels.index(st.selectbox("Select stint", labels, key="tyre_stint_selector",
-                                             filter_mode=None))]
+    numbers = [s["stint"] for s in stints]
+    by_number = {s["stint"]: s for s in stints}
+    stint_key = f"tyre_stint_{ctx}"
+    if st.session_state.get(stint_key) not in numbers:
+        st.session_state[stint_key] = numbers[0]
+    chosen = st.segmented_control(
+        "Stint", numbers, key=stint_key, required=True,
+        format_func=lambda n: f"Stint {n} · {by_number[n]['compound'].capitalize()} · laps "
+                              f"{by_number[n]['first_lap']}–{by_number[n]['last_lap']}")
+    stint = by_number[chosen]
 
-    st.plotly_chart(_build_strategy_figure(data, stint), width="stretch")
-    if "summary" not in stint:
+    cost = view["pit_cost"]
+    trained = {True: "this race was in the model's training data", False: "held-out test race"}
+    note = trained.get(view.get("in_training_data"))
+    advised = "summary" in stint
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Real stop", f"Lap {stint['actual_stop']}" if advised else "—",
+              help="The lap he actually pitted on (FastF1)")
+    window = normal_window(stint) if advised else []
+    c2.metric("Pit window", f"Laps {lap_ranges_text(window)}" if window else "—",
+              help="Best stop lap ± 2 laps. Safety-car 'pit now' calls are listed under the chart")
+    c3.metric("Real stop in the window", ("Yes" if stint["hit"] else "No") if advised else "—",
+              help=(f"A random window of the same size would contain it "
+                    f"{100 * stint['random_hit_chance']:.0f} % of the time") if advised else None)
+    err = lap_time_error(view)
+    c4.metric("Lap-time error, this race", "—" if err is None else f"{err:.3f} s",
+              help="Average difference between predicted and real lap time for this driver"
+                   + (f" ({note})" if note else "") + ". Rule-based sources make no lap-time predictions.")
+
+    st.plotly_chart(_build_strategy_figure(view, stint), width="stretch", key=f"tyre_chart_{ctx}_{source}")
+    st.caption(f"Green = pit window, yellow = safety car / VSC, red line = real stop, dotted = best stop lap. "
+               f"A stop costs {cost['normal_s']:.1f} s here ({cost['sc_vsc_s']:.1f} s under a safety car).")
+    if not advised:
         st.info("No pit advice for this stint (last stint, wet tyres, or no prediction yet).")
-        return
-    st.markdown("\n".join(f"- {line}" for line in stint["summary"]))
-    after = [n for n in stint["window"] if n > stint["last_lap"]]
-    if after:
-        st.caption(f"Window laps after the real stop ({lap_ranges_text(after)}) assume he had stayed "
-                   f"out; the chart shows only this stint's laps.")
-    # wear the model believed when the driver really pitted (after the stop it stays frozen)
-    at_stop = next((a for a in stint["advice"] if a["lap"] == stint["actual_stop"]), None)
-    wear_text = (f"{at_stop['wear_s']:.3f} s/lap" if at_stop and not at_stop.get("no_wear_signal")
-                 else "no signal")
-    n_window = len(stint["window"])
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Real stop", f"Lap {stint['actual_stop']}", "in window" if stint["hit"] else "outside window",
-                  delta_color="normal" if stint["hit"] else "inverse")
-    with c2:
-        st.metric("Window", f"{n_window} lap{'s' if n_window != 1 else ''}",
-                  f"random hit {100 * stint['random_hit_chance']:.0f} %", delta_color="off")
-    with c3:
-        st.metric("Wear at real stop", wear_text)
+    else:
+        st.markdown("\n".join(f"- {line}" for line in stint["summary"]))
+        after = [n for n in stint["window"] if n > stint["last_lap"]]
+        if after:
+            st.caption(f"Window laps after the real stop ({lap_ranges_text(after)}) assume he had stayed "
+                       f"out; the chart shows only this stint's laps.")
 
-
-def render_ai_analysis(
-    df_mistakes: Optional[pd.DataFrame],
-    meta: Optional[dict],
-    df_session: pd.DataFrame,
-    scrub_seconds: float,
-    tyre_data: Optional[dict] = None,
-    mistake_events: Optional[dict] = None,
-) -> None:
-    """Renders the AI Analysis tab content (tyre_data = the *_strategy.json output)."""
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        _render_isolation_forest_column(df_mistakes, meta, (mistake_events or {}).get("events"))
-
-    with col_right:
-        _render_strategy_column(tyre_data)
+    # ── How the models compare ────────────────────────────────────────────
+    st.markdown("#### How the tyre models compare")
+    err_fig, hit_fig = _comparison_figures(data)
+    a, b = st.columns(2)
+    with a:
+        st.markdown("**Lap-time error on the 5 test races** (lower is better)")
+        st.plotly_chart(err_fig, width="stretch", key=f"tyre_err_{ctx}", config={"displayModeBar": False})
+        st.caption("Average difference between the predicted and the real next lap time, on races the "
+                   "models never saw.")
+    with b:
+        st.markdown("**Pit window against a random window** (test races)")
+        st.plotly_chart(hit_fig, width="stretch", key=f"tyre_hit_{ctx}", config={"displayModeBar": False})
+        st.caption("How often the real stop fell inside the window, against a random window of the same "
+                   "size. More accurate lap times do not give better windows: even perfect wear does not "
+                   "(ceiling test), because real stops follow strategy, traffic and safety cars.")

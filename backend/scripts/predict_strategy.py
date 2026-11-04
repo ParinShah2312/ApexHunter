@@ -5,9 +5,9 @@
 --------------------------------------------------------------------------------
   Purpose : For one driver in one race: predict each lap with the tyre pace model, work out the
             pit window and safety-car calls, compare with the real stops, and write
-            data_lake/tyre_predictions/{session}_{driver}_strategy.json for the dashboard's AI tab.
+            data_lake/tyre_predictions/{session}_{driver}_strategy.json for the dashboard.
 
-  Usage   : python backend/scripts/predict_strategy.py --session data_lake/clean_data/2024_22_R.parquet --driver 1
+  Usage   : python backend/scripts/predict_strategy.py --session data_lake/clean_data/2024_22_R.parquet --driver 1 [--source all]
 ================================================================================
 """
 
@@ -31,10 +31,23 @@ from utils import DATA_LAKE_DIR, IST, PROJECT_ROOT, enable_fastf1_cache, setup_l
 
 logger = setup_logger(__name__)
 # Wear sources. "best" = the one with the largest margin over a random window in the last
-# check_strategy.py run (user, 2026-11-04: show whichever is best).
-SOURCES = ("best", "ridge", "rnn", "lstm", "no_change", "laps_driven")
+# check_strategy.py run (user, 2026-11-04: show whichever is best). "all" = the best one on top
+# plus every source under "sources", for the dashboard's model switch.
+SOURCES = ("best", "all", "ridge", "rnn", "lstm", "no_change", "laps_driven")
+EACH_SOURCE = ("ridge", "rnn", "lstm", "no_change", "laps_driven")
 RULE_BASED = ("no_change", "laps_driven")
 CHECK_FILE = DATA_LAKE_DIR / "tyre_predictions" / "strategy_check.json"
+
+
+def _predictor(source: str, models_dir: Path):
+    """(predict function, model config) for a model source; (None, {}) for the rule-based ones."""
+    if source == "ridge":
+        ridge, config = load_ridge(models_dir)
+        return (lambda w: ridge.predict(flatten(w))), config
+    if source in CELLS:
+        model, scaler, config = load_model_artifacts(models_dir, logger, cell=source)
+        return sequence_predictor(model, scaler, config["y_mean"], config["y_std"]), config
+    return None, {}
 
 
 def run_prediction(session_path: Path, driver: str, models_dir: Path, source: str = "best",
@@ -49,17 +62,10 @@ def run_prediction(session_path: Path, driver: str, models_dir: Path, source: st
         with open(check_file, "r", encoding="utf-8") as f:
             check = json.load(f)
         scores, best = check["summary"], check["best_source"]
-    if source == "best":
+    if source in ("best", "all"):
         if best is None:
             raise FileNotFoundError(f"{check_file} not found: run check_strategy.py first, or pass --source")
-        source = best
-    config, predict = {}, None
-    if source == "ridge":
-        ridge, config = load_ridge(models_dir)
-        predict = lambda w: ridge.predict(flatten(w))      # noqa: E731
-    elif source in CELLS:
-        model, scaler, config = load_model_artifacts(models_dir, logger, cell=source)
-        predict = sequence_predictor(model, scaler, config["y_mean"], config["y_std"])
+    wanted = EACH_SOURCE if source == "all" else (best if source == "best" else source,)
 
     stem = session_path.stem
     year, rnd, kind = stem.split("_")
@@ -73,17 +79,30 @@ def run_prediction(session_path: Path, driver: str, models_dir: Path, source: st
     driver_laps = laps.pick_drivers(driver)
     if tel.empty or len(driver_laps) == 0:
         raise ValueError(f"No data for driver '{driver}' in {session_path.name}")
+    cost = race_pit_cost(laps)
+    stints = None
 
-    if source == "no_change":
-        known = {lap: 0.0 for lap in range(1, int(laps["LapNumber"].max()) + 2)}
-    elif source == "laps_driven":
-        known = observed_changes(driver_laps)
-    else:
-        known = predicted_changes(extract_stints(driver_laps, tel, logger), predict)
-    out = build_strategy_output(
-        driver_laps, known, race_pit_cost(laps), source,
-        in_training_data=None if source in RULE_BASED else stem not in config.get("test_races", []),
-        lap_predictions=source not in RULE_BASED)
+    def build(src: str) -> dict:
+        nonlocal stints
+        predict, config = _predictor(src, models_dir)
+        if src == "no_change":
+            known = {lap: 0.0 for lap in range(1, int(laps["LapNumber"].max()) + 2)}
+        elif src == "laps_driven":
+            known = observed_changes(driver_laps)
+        else:
+            if stints is None:
+                stints = extract_stints(driver_laps, tel, logger)
+            known = predicted_changes(stints, predict)
+        return build_strategy_output(
+            driver_laps, known, cost, src,
+            in_training_data=None if src in RULE_BASED else stem not in config.get("test_races", []),
+            lap_predictions=src not in RULE_BASED)
+
+    outputs = {src: build(src) for src in wanted}
+    out = dict(outputs[best if source == "all" else wanted[0]])
+    if source == "all":
+        out["sources"] = {src: {k: o[k] for k in ("model", "in_training_data", "laps", "stints")}
+                          for src, o in outputs.items()}
     out.update({"strategy_scores": scores, "best_source": best})
     out.update({"session_file": str(session_path), "driver": driver,
                 "driver_code": str(driver_laps["Driver"].iloc[0]),
@@ -96,7 +115,8 @@ def main() -> None:
     p.add_argument("--session", type=str, required=True, help="Path to a clean race parquet file.")
     p.add_argument("--driver", type=str, required=True, help="Driver number, e.g. 1.")
     p.add_argument("--source", type=str, default="best", choices=SOURCES,
-                   help="Wear source; 'best' = best in the last check_strategy.py run.")
+                   help="Wear source; 'best' = best in the last check_strategy.py run; 'all' = best "
+                        "on top plus every source (for the dashboard's model switch).")
     p.add_argument("--models-dir", type=str, default=None, help="Folder with the saved model.")
     p.add_argument("--output-dir", type=str, default=None, help="Output folder.")
     p.add_argument("--force", action="store_true", default=False, help="Overwrite existing output.")

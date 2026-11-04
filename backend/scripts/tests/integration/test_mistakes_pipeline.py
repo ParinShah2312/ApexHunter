@@ -42,7 +42,7 @@ class TestMistakesOnRealData(unittest.TestCase):
 
     def test_outputs_have_what_the_dashboard_and_mongodb_read(self):
         """Output schema (replaces old audit item A20): columns, meta keys and event fields read by
-        frontend/components (ai_analysis, track_map, app.py) and bigdata/mongo_manager.py."""
+        frontend/components (strategy_tab, mistakes_tab, app.py) and bigdata/mongo_manager.py."""
         self.assertTrue({"X", "Y", "Speed", "SessionTime", "LapNumber", "is_mistake", "anomaly_score",
                          "event_id"} <= set(self.df.columns))
         self.assertTrue({"session_file", "driver", "best_contamination", "reference_drivers",

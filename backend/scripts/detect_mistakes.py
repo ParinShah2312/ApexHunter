@@ -55,10 +55,30 @@ def drop_traffic(df: pd.DataFrame, session, driver: str) -> pd.DataFrame:
     return df[~traffic_mask(session, driver, df)].reset_index(drop=True)
 
 
-def compare_with_baseline(evaluation: dict, X: np.ndarray, df_driver: pd.DataFrame, time_check) -> dict:
+DETECTOR_SHORT = {"z_score": "z", "lstm_autoencoder": "ae"}     # column prefixes in the parquet
+
+
+def detector_events(df_driver: pd.DataFrame, flags: np.ndarray, excess: np.ndarray, finish_events):
+    """Event ids and the event list (reason, location, time lost) for one detector's flags.
+
+    excess = how far each sample's score is past the detector's flag threshold (> 0 = flagged);
+    build_events reads it as -anomaly_score, the Isolation Forest's sign convention.
+    finish_events(events, df) adds the location and time lost, as for the Isolation Forest.
+    """
+    d = df_driver.assign(is_mistake=flags, anomaly_score=(-excess).astype("float32"))
+    d["event_id"] = assign_events(d)
+    return d["event_id"].to_numpy(), finish_events(build_events(d), d)
+
+
+def compare_with_baseline(evaluation: dict, X: np.ndarray, df_driver: pd.DataFrame, time_check,
+                          finish_events) -> tuple:
     """Z-score baseline vs Isolation Forest vs LSTM autoencoder on the same planted folds and flag
     rate; on the real laps, how much the Z-score's and autoencoder's flags agree with the Isolation
-    Forest's, and their events' time-lost check (`time_check(event_windows)` -> costly_share)."""
+    Forest's, and their events' time-lost check (`time_check(event_windows)` -> costly_share).
+
+    Returns (comparison for the meta file, {short: (flags, event ids)} for the parquet,
+    {name: events} for the events file) so the dashboard can show every detector's own events.
+    """
     best = evaluation["best"]
     detectors = {"z_score": ZScoreDetector,
                  "isolation_forest": lambda: ForestDetector(best["max_samples"], best["max_features"]),
@@ -68,10 +88,14 @@ def compare_with_baseline(evaluation: dict, X: np.ndarray, df_driver: pd.DataFra
     laps = df_driver["LapNumber"].to_numpy()
     if_flags = df_driver["is_mistake"].to_numpy()
     out = {"contamination": CONTAMINATION, "planted": planted, "real_laps": {}}
-    for name, short, det in (("z_score", "z", ZScoreDetector()), ("lstm_autoencoder", "ae", LSTMAutoencoderDetector())):
+    per_sample, event_lists = {}, {}
+    for name, det in (("z_score", ZScoreDetector()), ("lstm_autoencoder", LSTMAutoencoderDetector())):
+        short = DETECTOR_SHORT[name]
         scores = det.fit(X, laps).score(X, laps)
-        flags = scores > np.quantile(scores, 1 - CONTAMINATION)
-        ev = assign_events(df_driver.assign(is_mistake=flags))
+        threshold = np.quantile(scores, 1 - CONTAMINATION)
+        flags = scores > threshold
+        ev, event_lists[name] = detector_events(df_driver, flags, scores - threshold, finish_events)
+        per_sample[short] = (flags, ev)
         out[f"{name}_time_lost_check"] = time_check(event_windows(df_driver, ev))
         out["real_laps"].update({
             f"{name}_flagged_samples": int(flags.sum()),
@@ -81,7 +105,7 @@ def compare_with_baseline(evaluation: dict, X: np.ndarray, df_driver: pd.DataFra
         })
         if name == "z_score":
             out["real_laps"]["shared_flagged_samples"] = int((flags & if_flags).sum())
-    return out
+    return out, per_sample, event_lists
 
 
 def log_comparison(comparison: dict) -> None:
@@ -164,10 +188,13 @@ def run_pipeline(session_path: str, driver: str, output_dir: Path, force: bool, 
     for col in FEATURE_COLUMNS + INFO_COLUMNS:
         df_driver[col] = features[col]
     df_driver["event_id"] = assign_events(df_driver)
-    events = build_events(df_driver)
-    for e in events:
-        e["location"] = location_label(e["track_pos_m"], corners, lap_length)
-    events = add_time_lost(events, df_driver, timing, stint_of, lap_length, nearby)
+
+    def finish_events(evs: list, df_events: pd.DataFrame) -> list:
+        for e in evs:
+            e["location"] = location_label(e["track_pos_m"], corners, lap_length)
+        return add_time_lost(evs, df_events, timing, stint_of, lap_length, nearby)
+
+    events = finish_events(build_events(df_driver), df_driver)
     meta = build_meta(str(session_path), driver, ref_drivers, int(df_driver["LapNumber"].nunique()),
                       evaluation, df_driver)
     meta["effective_max_samples"] = int(model.max_samples_)      # rows per tree after capping at the data size
@@ -181,11 +208,16 @@ def run_pipeline(session_path: str, driver: str, output_dir: Path, force: bool, 
     }
     logger.info(f"Time-lost check: costly share {meta['time_lost_check']['isolation_forest']['costly_share']} "
                 f"of events vs {meta['time_lost_check']['random_spots']['costly_share']} of random spots")
+    other_events = None
     if compare:
-        meta["comparison"] = compare_with_baseline(evaluation, features[FEATURE_COLUMNS].to_numpy(), df_driver,
-                                                   lambda windows: costly_share(windows, timing, stint_of, lap_length, nearby))
+        meta["comparison"], per_sample, other_events = compare_with_baseline(
+            evaluation, features[FEATURE_COLUMNS].to_numpy(), df_driver,
+            lambda windows: costly_share(windows, timing, stint_of, lap_length, nearby), finish_events)
+        for short, (flags, ev) in per_sample.items():
+            df_driver[f"{short}_flag"] = flags
+            df_driver[f"{short}_event_id"] = ev.astype("int32")
         log_comparison(meta["comparison"])
-    save_outputs(df_driver, meta, events, output_dir, output_stem, logger)
+    save_outputs(df_driver, meta, events, output_dir, output_stem, logger, other_events)
     logger.info(f"Done: {meta['total_mistakes']}/{meta['total_rows']} samples flagged ({meta['mistake_rate_pct']:.1f}%) in {len(events)} events")
 
 
