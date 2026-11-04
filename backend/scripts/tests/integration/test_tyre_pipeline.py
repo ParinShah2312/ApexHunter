@@ -1,4 +1,5 @@
-"""Integration test: the real LSTM tyre pipeline (train -> save -> load -> predict) on real data.
+"""Integration test: the real LSTM / vanilla RNN tyre pipeline (train -> save -> load -> predict ->
+pit-window check) on real data (ROADMAP §D).
 
 No mocks: four real 2024 races from data_lake/clean_data (copied to a temp folder) and FastF1 laps
 from the project cache. A small, short training run goes to a temp models folder; the project's
@@ -34,7 +35,8 @@ class TestTyrePipelineOnRealData(unittest.TestCase):
         import pandas as pd
         from lstm.tyre_data import extract_stints
         from lstm.tyre_io import load_model_artifacts
-        from lstm.tyre_model import predict_single_stint
+        from lstm.tyre_model import sequence_predictor
+        from strategy.strategy_check import predicted_changes
         from train_lstm import run_training
         from utils import enable_fastf1_cache
 
@@ -50,7 +52,11 @@ class TestTyrePipelineOnRealData(unittest.TestCase):
 
         cls.config = run_training(sessions_dir, cls.models_dir, ["2024"], test_split=0.25, log=log,
                                   grid=[{"hidden_size": 32, "learning_rate": 0.001}],
-                                  n_epochs_search=5, n_epochs_final=5)
+                                  n_epochs_search=5, n_epochs_final=5, seeds=(42, 43))
+        cls.rnn_config = run_training(sessions_dir, cls.models_dir, ["2024"], test_split=0.25, log=log,
+                                      grid=[{"hidden_size": 32, "learning_rate": 0.001}],
+                                      n_epochs_search=5, n_epochs_final=5, cell="rnn", seeds=(42,))
+        cls.log, cls.sessions_dir = log, sessions_dir
         model, scaler, config = load_model_artifacts(cls.models_dir, log)
 
         enable_fastf1_cache()
@@ -59,8 +65,8 @@ class TestTyrePipelineOnRealData(unittest.TestCase):
         df = pd.read_parquet(RACES[-1])
         df_driver = df[df["Driver"] == PREDICT_DRIVER].sort_values("SessionTime").reset_index(drop=True)
         stints = extract_stints(session.laps.pick_drivers(PREDICT_DRIVER), df_driver, log)
-        cls.results = [predict_single_stint(s, model, scaler, config["y_mean"], config["y_std"],
-                                            config["sequence_length"]) for s in stints]
+        cls.stints = stints
+        cls.changes = predicted_changes(stints, sequence_predictor(model, scaler, config["y_mean"], config["y_std"]))
 
     @classmethod
     def tearDownClass(cls):
@@ -77,21 +83,52 @@ class TestTyrePipelineOnRealData(unittest.TestCase):
         with open(self.models_dir / "tyre_config.json", encoding="utf-8") as f:
             self.assertEqual(json.load(f)["input_size"], len(LAP_FEATURES))
 
+    def test_config_reports_the_saved_model_and_metrics_vs_no_change(self):
+        """§D / #46: val_mse is the saved final model's (the best of its seeds), not the search
+        run's; test metrics are on the real scale, next to "no change"; test races recorded."""
+        c = self.config
+        self.assertEqual(c["val_mse"], min(r["val_mse"] for r in c["seed_runs"]))
+        self.assertEqual([r["seed"] for r in c["seed_runs"]], [42, 43])
+        self.assertEqual(c["test_races"], ["2024_4_R"])
+        for part in ("test", "test_no_change"):
+            self.assertLess(c["metrics"][part]["mae_s"], 2.0)          # seconds, not normalised
+        self.assertAlmostEqual(c["metrics"]["test_no_change"]["r2"], 0.0, delta=0.05)
+
+    def test_rnn_saved_next_to_the_lstm_and_both_go_through_the_pit_window(self):
+        """§D: the RNN has its own files and RNN layer; both models are scored by the strategy check
+        on the same real stints as "no change" and "laps driven"."""
+        import torch.nn as nn
+        from check_strategy import check_races
+        from lstm.tyre_io import load_model_artifacts
+        from lstm.tyre_model import sequence_predictor
+        from strategy.strategy_check import summarise
+
+        self.assertTrue((self.models_dir / "tyre_rnn.pt").exists())
+        self.assertEqual(self.rnn_config["cell"], "rnn")
+        predictors = {}
+        for cell in ("lstm", "rnn"):
+            model, scaler, cfg = load_model_artifacts(self.models_dir, self.log, cell=cell)
+            self.assertIsInstance(model.lstm, nn.LSTM if cell == "lstm" else nn.RNN)
+            predictors[cell] = sequence_predictor(model, scaler, cfg["y_mean"], cfg["y_std"])
+        s = summarise(check_races(self.sessions_dir, ["2024_4_R"], predictors, self.log))
+        self.assertEqual(set(s), {"lstm", "rnn", "no_change", "laps_driven"})
+        self.assertEqual(len({v["stints"] for v in s.values()}), 1)        # same stints for all
+        self.assertGreater(s["lstm"]["stints"], 10)
+
     def test_predictions_only_where_a_five_lap_history_exists(self):
         """#20/#21: a lap is predicted iff the 5 laps before it are consecutive kept laps."""
-        self.assertGreaterEqual(len(self.results), 1)
-        for stint in self.results:
-            laps = stint["lap_numbers"]
-            for i, pred in enumerate(stint["predicted_laps"]):
-                has_history = i >= 5 and laps[i] - laps[i - 5] == 5
-                self.assertEqual(pred is not None, has_history, (stint["stint_index"], laps[i]))
+        expected = set()
+        for stint in self.stints:
+            laps = [int(n) for n in stint["lap_features"]["race_lap_number"]]
+            expected |= {laps[i] for i in range(5, len(laps)) if laps[i] - laps[i - 5] == 5}
+            expected |= {laps[i] + 1 for i in range(4, len(laps))      # the lap after a 5-lap run (#52)
+                         if laps[i] - laps[i - 4] == 4 and (i + 1 == len(laps) or laps[i + 1] != laps[i] + 1)}
+        self.assertTrue(expected)
+        self.assertEqual(set(self.changes), expected)
 
-    def test_predicted_lap_times_are_realistic(self):
-        """Predicted lap times are within 10 % of the real ones (Japan 2024: ~95 s laps)."""
-        for stint in self.results:
-            for actual, pred in zip(stint["actual_laps"], stint["predicted_laps"]):
-                if pred is not None and actual is not None:
-                    self.assertAlmostEqual(pred, actual, delta=0.10 * actual)
+    def test_predicted_changes_are_realistic(self):
+        """Predicted lap-time changes are tenths of a second (Japan 2024: ~95 s laps), not lap times."""
+        self.assertLess(max(abs(v) for v in self.changes.values()), 3.0)
 
 
 if __name__ == "__main__":

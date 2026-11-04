@@ -4,7 +4,7 @@ F1 telemetry has no labelled mistakes, so we make a test we can score: plant fak
 known places in real held-out laps and count how many of them the detector's events find, per
 mistake (not per sample): a planted mistake is found when any of its samples is inside an event,
 and an event is correct when it touches a planted mistake. Any
-detector with fit(X) and score(X) (higher = more anomalous) can be evaluated the same way, so the
+detector with fit(X, laps) and score(X, laps) (higher = more anomalous) can be evaluated the same way, so the
 Z-score baseline and the LSTM autoencoder reuse this module.
 """
 
@@ -17,7 +17,7 @@ from sklearn.model_selection import GroupKFold
 from isolation_forest.mistakes_events import assign_events
 
 from isolation_forest.mistakes_features import (
-    ACCEL_WINDOW_S, BRAKE_ON_THRESHOLD, FEATURE_COLUMNS, compute_acceleration, engineer_features,
+    ACCEL_WINDOW_S, BRAKE_ON_THRESHOLD, FEATURE_COLUMNS, engineer_features,
 )
 
 # ── Injection constants ───────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ def inject_mistakes(df: pd.DataFrame, rng: np.random.Generator) -> Tuple[pd.Data
         rng: Random generator (seeded by the caller for reproducibility).
 
     Returns:
-        (modified copy with acceleration recomputed, planted-mistake number per sample (-1 where
+        (modified copy with acceleration updated by the planted speed change, planted-mistake number per sample (-1 where
         nothing was planted), mistake type per sample ("" where nothing was planted)).
     """
     out = df.copy()
@@ -152,12 +152,17 @@ def inject_mistakes(df: pd.DataFrame, rng: np.random.Generator) -> Tuple[pd.Data
             mistake_ids[rows] = mistake_ids.max() + 1
             kinds[rows] = kind
             planted += 1
-        # Speed changed -> recompute acceleration inside the lap (skip the first 0.5 s: its look-back
-        # window starts in the previous lap, which this frame may not contain)
-        lap = out.iloc[idx]
-        accel = compute_acceleration(lap).to_numpy()
-        inside = lap["t"].to_numpy() - t[0] >= ACCEL_WINDOW_S
-        out.iloc[idx[inside], out.columns.get_loc("accel")] = accel[inside].astype(out["accel"].dtype)
+        # Speed changed -> update acceleration by the change alone (#48). accel was computed on the
+        # full telemetry before the traffic filter; recomputing it on this lap would interpolate
+        # across the removed traffic samples and give unplanted samples a fake acceleration. The
+        # planted speed change dv is 0 outside the mistakes, so only samples within 0.5 s after a
+        # planted one change, and a gap in the lap cannot leak into the result.
+        dv = out["Speed"].to_numpy(dtype=float)[idx] - df["Speed"].to_numpy(dtype=float)[idx]
+        if np.any(dv):
+            dv_before = np.interp(t - ACCEL_WINDOW_S, t, dv, left=0.0)
+            col = out.columns.get_loc("accel")
+            new_accel = out.iloc[idx, col].to_numpy(dtype=float) + (dv - dv_before) / ACCEL_WINDOW_S
+            out.iloc[idx, col] = new_accel.astype(out["accel"].dtype)
     return out.drop(columns=["t"]), mistake_ids, kinds
 
 
@@ -208,7 +213,9 @@ def build_folds(df: pd.DataFrame, profile: pd.DataFrame, n_folds: int, seeds: Tu
     """Lap-grouped folds with planted test sets, shared by every detector being evaluated.
 
     Returns:
-        List of (clean training-lap features, [planted_test_set output per seed]).
+        List of (clean training-lap features, [planted_test_set output per seed], lap number of each
+        training row). The lap numbers let sequence detectors (the LSTM autoencoder) keep their
+        windows inside one lap.
 
     Raises:
         ValueError: If there are fewer than 2 laps.
@@ -221,7 +228,7 @@ def build_folds(df: pd.DataFrame, profile: pd.DataFrame, n_folds: int, seeds: Tu
     folds = []
     for train_idx, test_idx in GroupKFold(n_splits=n_folds).split(X_all, groups=laps):
         tests = [planted_test_set(df.iloc[test_idx], profile, seed) for seed in seeds]
-        folds.append((X_all[train_idx], tests))
+        folds.append((X_all[train_idx], tests, laps[train_idx]))
     return folds
 
 
@@ -250,13 +257,13 @@ class ZScoreDetector:
     driver's own mean (learned on the training laps); the score is the largest |z| over the
     features, so a sample is flagged when any one feature is extreme."""
 
-    def fit(self, X: np.ndarray) -> "ZScoreDetector":
+    def fit(self, X: np.ndarray, laps=None) -> "ZScoreDetector":
         self.mean_ = X.mean(axis=0)
         self.std_ = X.std(axis=0)
         self.std_[self.std_ == 0] = 1.0
         return self
 
-    def score(self, X: np.ndarray) -> np.ndarray:
+    def score(self, X: np.ndarray, laps=None) -> np.ndarray:
         return np.abs((X - self.mean_) / self.std_).max(axis=1)
 
 
@@ -265,7 +272,8 @@ def compare_detectors(folds, detectors: Dict[str, Callable[[], object]], contami
 
     Args:
         folds: Output of build_folds.
-        detectors: name -> factory returning an unfitted detector with fit(X) and score(X).
+        detectors: name -> factory returning an unfitted detector with fit(X, laps) and score(X, laps)
+            (laps = lap number per row; only sequence detectors use it).
         contamination: Share of training-lap samples flagged (the same for every detector).
 
     Returns:
@@ -274,9 +282,10 @@ def compare_detectors(folds, detectors: Dict[str, Callable[[], object]], contami
     results = {}
     for name, make in detectors.items():
         per_test = []
-        for X_train, tests in folds:
-            det = make().fit(X_train)
-            train_scores = det.score(X_train)
-            per_test += [fold_metrics(train_scores, det.score(test[0]), test, contamination) for test in tests]
+        for X_train, tests, train_laps in folds:
+            det = make().fit(X_train, train_laps)
+            train_scores = det.score(X_train, train_laps)
+            per_test += [fold_metrics(train_scores, det.score(test[0], test[3]["LapNumber"].to_numpy()), test,
+                                      contamination) for test in tests]
         results[name] = summarise(per_test)
     return results

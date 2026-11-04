@@ -8,7 +8,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from components.ai_analysis import stint_lap_axis
 
 _DARK_BG = "#0d1520"
 _PAPER = "rgba(0,0,0,0)"
@@ -28,7 +27,7 @@ def build_pipeline_dag() -> go.Figure:
     nodes = [
         "FastF1 API", "Local Parquets", "HDFS Raw",
         "Spark ETL", "HDFS Clean", "Isolation Forest",
-        "MongoDB", "LSTM Trainer", "Tyre Predictor",
+        "MongoDB", "Ridge / RNN / LSTM", "Pit window",
         "A* / Dijkstra / BFS", "Dashboard"
     ]
     x = [0.05, 0.20, 0.35, 0.50, 0.65, 0.50, 0.65, 0.50, 0.65, 0.35, 0.85]
@@ -291,66 +290,6 @@ def build_speed_over_distance(sample_df: pd.DataFrame) -> go.Figure:
         margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
         xaxis=dict(title="Session time (min)", gridcolor=_GRID),
         yaxis=dict(title="Speed (km/h)", gridcolor=_GRID),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10, color="#6b7890")))
-    return fig
-
-
-# ──  ──────────────────────────────────────────────────────────────────────────
-#  12. LSTM tyre degradation line chart (all stints overlay)
-# ──  ──────────────────────────────────────────────────────────────────────────
-def build_tyre_degradation_line(tyre_data: dict) -> go.Figure:
-    stints = tyre_data.get("stints", [])
-    if not stints:
-        return go.Figure()
-    pal = [_ACCENT, _PURPLE, _GREEN, _ORANGE, _RED]
-    fig = go.Figure()
-    for i, s in enumerate(stints):
-        laps, x_title = stint_lap_axis(s)
-        c = pal[i % len(pal)]
-        fig.add_trace(go.Scatter(x=laps, y=s["actual_laps"], mode="lines+markers",
-            name=f"Stint {i+1} Actual", line=dict(color=c, width=2), marker=dict(size=4),
-            hovertemplate=f"Stint {i+1} Actual<br>Lap %{{x}}<br>Time: %{{y:.2f}}s<extra></extra>"))
-        fig.add_trace(go.Scatter(x=laps, y=s["predicted_laps"], mode="lines",
-            name=f"Stint {i+1} LSTM", line=dict(color=c, width=1.5, dash="dash"),
-            hovertemplate=f"Stint {i+1} LSTM<br>Lap %{{x}}<br>Predicted: %{{y:.2f}}s<extra></extra>"))
-        if s.get("cliff_lap") is not None:
-            fig.add_vline(x=laps[min(s["cliff_lap"], len(laps) - 1)], line=dict(color=_RED, dash="dot", width=1),
-                annotation_text=f"Cliff S{i+1}", annotation_font=dict(color=_RED, size=9))
-    fig.update_layout(paper_bgcolor=_PAPER, plot_bgcolor=_DARK_BG, height=320,
-        margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
-        xaxis=dict(title=x_title, gridcolor=_GRID),
-        yaxis=dict(title="Lap Time (s)", gridcolor=_GRID),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=9, color="#6b7890")))
-    return fig
-
-
-# ──  ──────────────────────────────────────────────────────────────────────────
-#  13. LSTM confidence band area chart
-# ──  ──────────────────────────────────────────────────────────────────────────
-def build_lstm_confidence_area(tyre_data: dict) -> go.Figure:
-    stints = tyre_data.get("stints", [])
-    if not stints:
-        return go.Figure()
-    s = stints[0]  # first stint
-    laps, x_title = stint_lap_axis(s)
-    # Laps without a full 5-lap history have no prediction (None); a filled band can't span them
-    band = [(x, u, lo) for x, u, lo in zip(laps, s["confidence_upper"], s["confidence_lower"])
-            if u is not None and lo is not None]
-    band_x = [b[0] for b in band]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=band_x + band_x[::-1],
-        y=[b[1] for b in band] + [b[2] for b in band][::-1],
-        fill="toself", fillcolor="rgba(168,85,247,0.15)",
-        line=dict(color="rgba(0,0,0,0)"), name="±1σ (MC dropout)", hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=laps, y=s["predicted_laps"], mode="lines",
-        line=dict(color=_PURPLE, width=2), name="LSTM Predicted",
-        hovertemplate="Lap %{x}<br>LSTM: %{y:.2f}s<extra></extra>"))
-    fig.add_trace(go.Scatter(x=laps, y=s["actual_laps"], mode="lines+markers",
-        line=dict(color=_ACCENT, width=2), marker=dict(size=4), name="Actual",
-        hovertemplate="Lap %{x}<br>Actual: %{y:.2f}s<extra></extra>"))
-    fig.update_layout(paper_bgcolor=_PAPER, plot_bgcolor=_DARK_BG, height=280,
-        margin=dict(t=20,b=30,l=50,r=10), font=_FONT,
-        xaxis=dict(title=x_title, gridcolor=_GRID), yaxis=dict(title="Lap Time (s)", gridcolor=_GRID),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=10, color="#6b7890")))
     return fig
 

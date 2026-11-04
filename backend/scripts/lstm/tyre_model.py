@@ -1,15 +1,14 @@
-"""LSTM architecture and training loop for the ApexHunter tyre cliff predictor.
-Handles model definition, hyperparameter search, training, and evaluation."""
+"""Recurrent tyre pace models (LSTM and vanilla RNN, ROADMAP §D) and their training loop.
+Handles model definition, hyperparameter search, training, evaluation and prediction."""
 
 import copy
 import gc
 import logging
 import math
 import time
-from typing import List, Optional, Tuple, Any
+from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -23,10 +22,10 @@ INPUT_SIZE: int = 9
 """Number of features per lap (len(LAP_FEATURES))."""
 
 NUM_LAYERS: int = 2
-"""Stacked LSTM layers."""
+"""Stacked recurrent (LSTM or RNN) layers."""
 
 DROPOUT_RATE: float = 0.3
-"""Dropout between LSTM layers."""
+"""Dropout between the recurrent layers."""
 
 RANDOM_STATE: int = 42
 """Random seed for reproducibility."""
@@ -51,24 +50,37 @@ HYPERPARAM_GRID: List[dict] = [
     {"hidden_size": 64,  "learning_rate": 0.0005},
     {"hidden_size": 128, "learning_rate": 0.0001},
 ]
-"""Six combinations — exhaustive grid over hidden_size and learning_rate."""
+"""Six of the 3 x 3 hidden_size x learning_rate combinations (not exhaustive)."""
 
 
-class TyreCliffLSTM(nn.Module):
-    """LSTM model for predicting tyre pace degradation."""
+CELLS: Tuple[str, ...] = ("lstm", "rnn")
+"""Recurrent layer types: LSTM, or a vanilla (Elman, tanh) RNN with the same size and setup."""
+
+
+class TyrePaceRNN(nn.Module):
+    """Recurrent model predicting the next lap's change in lap time from a 5-lap window.
+
+    cell="lstm" (default) or "rnn": the vanilla RNN baseline of ROADMAP §D uses exactly the same
+    layers, dropout, head, data and training, so the two differ only in the recurrent cell.
+    """
 
     def __init__(self, input_size: int, hidden_size: int,
-                 num_layers: int, dropout: float) -> None:
-        """Initialize the LSTM model.
+                 num_layers: int, dropout: float, cell: str = "lstm") -> None:
+        """Initialize the model.
 
         Args:
             input_size: Number of features per time step.
-            hidden_size: Number of LSTM hidden units.
-            num_layers: Number of stacked LSTM layers.
-            dropout: Dropout probability between LSTM layers.
+            hidden_size: Number of hidden units.
+            num_layers: Number of stacked recurrent layers.
+            dropout: Dropout probability between recurrent layers.
+            cell: "lstm" or "rnn".
         """
         super().__init__()
-        self.lstm = nn.LSTM(
+        if cell not in CELLS:
+            raise ValueError(f"Unknown cell '{cell}' (use one of {CELLS})")
+        self.cell = cell
+        layer = nn.LSTM if cell == "lstm" else nn.RNN
+        self.lstm = layer(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -219,29 +231,33 @@ def train_one_config(
     *,
     verbose: bool = False,
     config_label: str = "",
-) -> Tuple[TyreCliffLSTM, float]:
-    """Train LSTM for one hyperparameter configuration.
+    cell: str = "lstm",
+    seed: int = RANDOM_STATE,
+) -> Tuple[TyrePaceRNN, float]:
+    """Train the LSTM or vanilla RNN for one hyperparameter configuration.
 
     Args:
         X_train: Training features, shape (N, seq_len, input_size).
         y_train: Training targets, shape (N,).
         X_val: Validation features.
         y_val: Validation targets.
-        hidden_size: Number of LSTM hidden units.
+        hidden_size: Number of hidden units.
         learning_rate: Adam learning rate.
         n_epochs: Number of training epochs.
         logger: Logger instance.
         verbose: If True, log every epoch; otherwise every 5th.
         config_label: Label prefix for log messages.
+        cell: "lstm" or "rnn".
+        seed: Random seed (weights, dropout and batch order).
 
     Returns:
         Tuple of (trained model, validation MSE).
     """
-    torch.manual_seed(RANDOM_STATE)
+    torch.manual_seed(seed)
 
     loader = _build_data_loader(X_train, y_train)
 
-    model = TyreCliffLSTM(INPUT_SIZE, hidden_size, NUM_LAYERS, DROPOUT_RATE)
+    model = TyrePaceRNN(INPUT_SIZE, hidden_size, NUM_LAYERS, DROPOUT_RATE, cell=cell)
     total_params = sum(p.numel() for p in model.parameters())
     if verbose:
         logger.info(f"{config_label}Model params: {total_params:,} trainable")
@@ -267,6 +283,7 @@ def run_hyperparameter_search(
     groups: Optional[np.ndarray] = None,
     grid: Optional[List[dict]] = None,
     n_epochs: int = N_EPOCHS_SEARCH,
+    cell: str = "lstm",
 ) -> Tuple[int, float, float]:
     """Grid search over HYPERPARAM_GRID.
 
@@ -320,7 +337,7 @@ def run_hyperparameter_search(
             X_train, y_train, X_val, y_val,
             hidden_size=h, learning_rate=lr,
             n_epochs=n_epochs, logger=logger,
-            config_label=label,
+            config_label=label, cell=cell,
         )
         cfg_time = time.time() - cfg_t0
 
@@ -360,8 +377,13 @@ def train_final_model(
     logger: logging.Logger,
     groups: Optional[np.ndarray] = None,
     n_epochs: int = N_EPOCHS_FINAL,
-) -> TyreCliffLSTM:
+    cell: str = "lstm",
+    seed: int = RANDOM_STATE,
+) -> Tuple[TyrePaceRNN, float]:
     """Train the final model for n_epochs, keeping the best-validation-epoch weights.
+
+    Returns (model, the final model's own best validation MSE) — #46: the config used to record the
+    search run's score instead.
 
     Args:
         X: Training feature array, shape (N, seq_len, input_size).
@@ -371,9 +393,8 @@ def train_final_model(
         logger: Logger instance.
         groups: Optional session index per sample, used to hold out whole sessions for validation.
         n_epochs: Number of training epochs.
-
-    Returns:
-        Trained TyreCliffLSTM model.
+        cell: "lstm" or "rnn".
+        seed: Random seed.
     """
     train_idx, val_idx = split_by_groups(len(X), groups, VAL_SPLIT)
     X_train, X_val = X[train_idx], X[val_idx]
@@ -383,7 +404,7 @@ def train_final_model(
     logger.info("=" * 56)
     logger.info("  PHASE 3 / 4 -- FINAL MODEL TRAINING")
     logger.info("=" * 56)
-    logger.info(f"  Architecture     : LSTM({INPUT_SIZE} -> {hidden_size} x {NUM_LAYERS})")
+    logger.info(f"  Architecture     : {cell.upper()}({INPUT_SIZE} -> {hidden_size} x {NUM_LAYERS}), seed {seed}")
     logger.info(f"  Learning rate    : {learning_rate}")
     logger.info(f"  Dropout          : {DROPOUT_RATE}")
     logger.info(f"  Epochs           : {n_epochs}")
@@ -398,164 +419,22 @@ def train_final_model(
         hidden_size=hidden_size, learning_rate=learning_rate,
         n_epochs=n_epochs, logger=logger,
         verbose=True,
-        config_label="[Final] ",
+        config_label="[Final] ", cell=cell, seed=seed,
     )
     final_time = time.time() - final_t0
 
     logger.info(f"Final model val_MSE: {val_mse:.6f}  (trained in {final_time:.1f}s)")
-    return model
+    return model, val_mse
 
 
-def evaluate_on_test(
-    model: TyreCliffLSTM,
-    X_test: np.ndarray,
-    y_test: np.ndarray,
-    scaler_target_mean: float,
-    scaler_target_std: float,
-) -> float:
-    """Compute MAE in km/h on the held-out test set.
-
-    Args:
-        model: Trained TyreCliffLSTM.
-        X_test: Test features, shape (N, seq_len, input_size).
-        y_test: Test targets (normalized), shape (N,).
-        scaler_target_mean: Mean used for target normalization.
-        scaler_target_std: Std used for target normalization.
-
-    Returns:
-        Mean Absolute Error in km/h.
-    """
-    logger.info("")
-    logger.info("=" * 56)
-    logger.info("  PHASE 4 / 4 -- TEST SET EVALUATION")
-    logger.info("=" * 56)
-    logger.info(f"  Test samples     : {len(X_test):,}")
-    logger.info(f"  Target mean      : {scaler_target_mean:.4f}")
-    logger.info(f"  Target std       : {scaler_target_std:.4f}")
-
-    model.eval()
-    with torch.no_grad():
-        preds = model(torch.FloatTensor(X_test)).numpy()
-
-    preds_denorm = preds * scaler_target_std + scaler_target_mean
-    y_denorm = y_test * scaler_target_std + scaler_target_mean
-
-    abs_errors = np.abs(preds_denorm - y_denorm)
-    mae = float(np.mean(abs_errors))
-    median_ae = float(np.median(abs_errors))
-    max_ae = float(np.max(abs_errors))
-    rmse = float(np.sqrt(np.mean((preds_denorm - y_denorm) ** 2)))
-
-    logger.info(f"  MAE              : {mae:.3f} km/h")
-    logger.info(f"  Median AE        : {median_ae:.3f} km/h")
-    logger.info(f"  Max AE           : {max_ae:.3f} km/h")
-    logger.info(f"  RMSE             : {rmse:.3f} km/h")
-    logger.info("=" * 56)
-    return mae
-
-
-def monte_carlo_predict(
-    model: TyreCliffLSTM,
-    X_input: np.ndarray,
-    n_samples: int = 10,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run N forward passes with dropout enabled to estimate prediction uncertainty.
-
-    Args:
-        model: Trained TyreCliffLSTM (dropout will be enabled for MC sampling).
-        X_input: Input features, shape (N, seq_len, input_size).
-        n_samples: Number of Monte Carlo forward passes.
-
-    Returns:
-        Tuple of (mean_preds, lower_bound, upper_bound), each shape (N,).
-    """
-    model.train()  # Enable dropout for MC sampling
-    X_t = torch.FloatTensor(X_input)
-
-    preds_list = []
-    for _ in range(n_samples):
+def sequence_predictor(model: nn.Module, scaler: Any, y_mean: float,
+                       y_std: float) -> Callable[[np.ndarray], np.ndarray]:
+    """windows (N, seq_len, n_features), unscaled -> predicted lap-time change (s) per window.
+    Deterministic (dropout off); used by the strategy check and output like Ridge's predict."""
+    def predict(windows: np.ndarray) -> np.ndarray:
+        scaled = scaler.transform(windows.reshape(-1, windows.shape[-1])).reshape(windows.shape)
+        model.eval()
         with torch.no_grad():
-            preds_list.append(model(X_t).numpy())
-
-    preds_arr = np.array(preds_list)  # shape (n_samples, N)
-
-    mean_preds = preds_arr.mean(axis=0)
-    std_preds = preds_arr.std(axis=0)
-    lower = mean_preds - std_preds
-    upper = mean_preds + std_preds
-
-    model.eval()
-    return (mean_preds, lower, upper)
-
-
-def predict_single_stint(
-    stint_data: dict, model: nn.Module, scaler: Any,
-    y_mean: float, y_std: float, seq_len: int
-) -> dict:
-    """Predict lap times and the tyre cliff for one stint.
-
-    A lap is predicted only if the seq_len laps before it are consecutive kept laps (the same
-    rule as the training windows, see tyre_data.window_positions); other laps get None. So the
-    model never sees padding or a window across a removed lap, and no lap is predicted from
-    itself. Stints with no such lap are still returned, with actual laps and no predictions.
-    """
-    from lstm.tyre_data import LAP_FEATURES, window_positions
-    stint_index = stint_data["stint_index"]
-    lap_features = pd.DataFrame(stint_data["lap_features"])
-    actual_speeds = lap_features["mean_speed"].tolist()
-    actual_lap_times = lap_features["lap_time_seconds"].tolist()
-    n = len(lap_features)
-
-    lap_numbers = [int(n) for n in lap_features["race_lap_number"]]
-
-    predicted_laps: List[Optional[float]] = [None] * n
-    confidence_lower: List[Optional[float]] = [None] * n
-    confidence_upper: List[Optional[float]] = [None] * n
-
-    positions = window_positions(lap_features["race_lap_number"], seq_len)
-    if positions:
-        features_np = lap_features[LAP_FEATURES].values
-        sequences = np.array([features_np[j - seq_len : j] for j in positions], dtype=np.float32)
-        seq_2d = sequences.reshape(-1, INPUT_SIZE)
-        seq_scaled = scaler.transform(seq_2d).reshape(sequences.shape)
-
-        mean_preds, lower, upper = monte_carlo_predict(model, seq_scaled)
-
-        mean_preds_speed = mean_preds * y_std + y_mean
-        lower_speed = lower * y_std + y_mean
-        upper_speed = upper * y_std + y_mean
-
-        valid_pairs = [(s, t) for s, t in zip(actual_speeds, actual_lap_times) if not pd.isna(t) and t > 0]
-        if valid_pairs:
-            track_dist = float(np.mean([s * t for s, t in valid_pairs]))
-        else:
-            track_dist = actual_speeds[0] * 90.0
-
-        def speed_to_time(s): return float(track_dist / max(s, 1.0))
-
-        for k, j in enumerate(positions):
-            predicted_laps[j] = speed_to_time(mean_preds_speed[k])
-            confidence_lower[j] = speed_to_time(upper_speed[k])    # faster speed -> shorter time
-            confidence_upper[j] = speed_to_time(lower_speed[k])
-
-    actual_laps_clean = [t if not pd.isna(t) else None for t in actual_lap_times]
-
-    # Cliff: first predicted lap after the best predicted lap that is 1.5 s slower than it
-    cliff_lap = None
-    if positions:
-        best_idx = min(positions, key=lambda j: predicted_laps[j])
-        best_lap_time = predicted_laps[best_idx]
-        for j in positions:
-            if j > best_idx and predicted_laps[j] > best_lap_time + 1.5:
-                cliff_lap = j
-                break
-
-    laps_remaining = (n - cliff_lap) if cliff_lap is not None else None
-
-    return {
-        "stint_index": stint_index, "n_laps": n,
-        "lap_numbers": lap_numbers,
-        "actual_laps": actual_laps_clean, "predicted_laps": predicted_laps,
-        "confidence_upper": confidence_upper, "confidence_lower": confidence_lower,
-        "cliff_lap": cliff_lap, "laps_remaining": laps_remaining,
-    }
+            out = model(torch.FloatTensor(scaled.astype(np.float32))).numpy()
+        return out * y_std + y_mean
+    return predict

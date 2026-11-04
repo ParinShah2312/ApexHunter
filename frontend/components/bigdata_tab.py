@@ -4,8 +4,8 @@
   Script: bigdata_tab.py
 --------------------------------------------------------------------------------
   Purpose : Streamlit dashboard tab that renders comprehensive Big Data
-            analytics across HDFS, Spark ETL, telemetry exploration, LSTM
-            tyre predictions, pathfinding algorithms, and MongoDB.
+            analytics across HDFS, Spark ETL, telemetry exploration,
+            pathfinding algorithms, and MongoDB.
 
   Usage   : Imported by frontend/app.py — render_bigdata_tab() is the entry point
 ================================================================================
@@ -45,7 +45,6 @@ from components.bigdata_charts import (
     build_spark_gauge, build_spark_waterfall, build_session_file_size_bar,
     build_speed_distribution, build_correlation_heatmap, build_speed_rpm_scatter,
     build_speed_over_distance,
-    build_tyre_degradation_line, build_lstm_confidence_area,
     build_algo_comparison_bar, build_tech_radar,
 )
 
@@ -320,49 +319,6 @@ def _render_telemetry_section(df_full: Optional[pd.DataFrame] = None) -> None:
             st.metric(label="Data Points", value=f"{len(sample_df):,}")
 
 
-def _render_lstm_section() -> None:
-    """Render the LSTM Tyre Degradation Analytics section."""
-    st.subheader("🧠 LSTM Tyre Degradation Analytics")
-
-    tyre_dir = Path(DATA_LAKE_DIR) / "tyre_predictions"
-    tyre_files = sorted(tyre_dir.glob("*.json")) if tyre_dir.exists() else []
-
-    if not tyre_files:
-        st.info("Run `predict_cliff.py` to generate tyre predictions.")
-        return
-
-    tyre_data = _load_json_log(tyre_files[0])
-    if not tyre_data:
-        st.info("Run `predict_cliff.py` to generate tyre predictions.")
-        return
-
-    stints = tyre_data.get("stints", [])
-
-    # Metrics
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric(label="Total Stints", value=len(stints))
-    with c2:
-        total_laps = sum(s["n_laps"] for s in stints)
-        st.metric(label="Total Laps", value=total_laps)
-    with c3:
-        cliffs = [s for s in stints if s.get("cliff_lap") is not None]
-        st.metric(label="Cliff Detections", value=len(cliffs))
-    with c4:
-        drv_num = tyre_data.get("driver", "—")
-        drv_name = DRIVER_MAPPING.get(str(drv_num), "Unknown")
-        st.metric(label="Driver", value=f"{drv_name} (#{drv_num})")
-
-    # Charts
-    col_deg, col_conf = st.columns([1, 1])
-    with col_deg:
-        st.markdown("##### Multi-Stint Degradation Overlay")
-        st.plotly_chart(build_tyre_degradation_line(tyre_data), width='stretch')
-    with col_conf:
-        st.markdown("##### LSTM Confidence Band (Stint 1)")
-        st.plotly_chart(build_lstm_confidence_area(tyre_data), width='stretch')
-
-
 def _render_pathfinding_section() -> None:
     """Render the Pathfinding Algorithm Comparison section."""
     st.subheader("🏁 Pathfinding Algorithm Comparison")
@@ -464,7 +420,7 @@ def _render_mongo_section() -> None:
             for coll_name, info in mongo_status.get("collections", {}).items():
                 st.metric(label=f"{coll_name} docs", value=info.get("document_count", 0))
         else:
-            st.warning(f"MongoDB unavailable: {e}. Start MongoDB and run mongo_manager.py --upload.")
+            st.warning(f"MongoDB unavailable: {e}. Start MongoDB and run backend/scripts/bigdata/mongo_manager.py --upload.")
 
 
 # ── Main Entry Point ──────────────────────────────────────────────────────────
@@ -483,8 +439,6 @@ def render_bigdata_tab(df_full: Optional[pd.DataFrame] = None) -> None:
     _render_spark_section(_load_json_log(SPARK_RUN_LOG))
     st.markdown("---")
     _render_telemetry_section(df_full)
-    st.markdown("---")
-    _render_lstm_section()
     st.markdown("---")
     _render_pathfinding_section()
     st.markdown("---")

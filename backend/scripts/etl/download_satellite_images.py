@@ -8,7 +8,7 @@
             Images are saved to data_lake/raw_images/satellite_maps/
 
   Usage   : pip install staticmap
-            python backend/scripts/download_satellite_images.py
+            python backend/scripts/etl/download_satellite_images.py
 ================================================================================
 """
 

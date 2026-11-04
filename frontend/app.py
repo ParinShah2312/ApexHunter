@@ -165,10 +165,14 @@ racing_line_data = load_racing_line(sel.racing_line_path)
 tyre_data = load_tyre_prediction(sel.tyre_prediction_path)
 
 # ── Step 2b: Assign lap numbers to mistake data ──────────────────────────────
+# The backend writes LapNumber with its own lap rule, which events.json uses too; re-assigning it
+# here (with a slightly different boundary rule) put boundary samples in other laps (#53). Only
+# outputs written before the rework lack the column.
 round_num, session_type = session_from_file(sel.session_filepath)
-lap_boundaries = get_lap_boundaries(sel.year, round_num, session_type, sel.driver_number)
-if df_mistakes is not None and lap_boundaries:
-    df_mistakes = assign_lap_numbers(df_mistakes, lap_boundaries)
+if df_mistakes is not None and "LapNumber" not in df_mistakes.columns:
+    lap_boundaries = get_lap_boundaries(sel.year, round_num, session_type, sel.driver_number)
+    if lap_boundaries:
+        df_mistakes = assign_lap_numbers(df_mistakes, lap_boundaries)
 
 # ── Step 3: Header bar ────────────────────────────────────────────────────────
 render_header_bar(sel)

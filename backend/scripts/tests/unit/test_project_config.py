@@ -15,8 +15,8 @@ import utils
 
 # Top-level names that are this project's own modules/packages, not pip packages
 LOCAL_MODULES = {
-    "utils", "components", "config", "cv", "etl", "bigdata", "lstm", "racing_line",
-    "isolation_forest", "detect_mistakes", "train_lstm", "predict_cliff", "optimal_line",
+    "utils", "components", "config", "cv", "etl", "bigdata", "lstm", "strategy", "racing_line", "train_ridge", "check_strategy", "predict_strategy",
+    "isolation_forest", "detect_mistakes", "train_lstm", "optimal_line",
     "conftest", "run_tests", "integration",
 }
 # import name → pip distribution name, where they differ

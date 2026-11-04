@@ -7,7 +7,7 @@
             handling, outlier clipping, type downcasting), and writes cleaned
             parquet output.
 
-  Usage   : python backend/scripts/clean_telemetry.py [--input-dir] [--file]
+  Usage   : python backend/scripts/etl/clean_telemetry.py [--input-dir] [--output-dir] [--file]
 ================================================================================
 """
 
@@ -106,19 +106,22 @@ def _downcast_to_float32(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
+def clean_telemetry_file(input_file: Path, output_file: Path) -> bool:
     """Loads, cleans, and saves a Single telemetry file.
 
     Args:
         input_file: Path to the raw telemetry file.
         output_file: Path to save the cleaned telemetry.
+
+    Returns:
+        False if the file could not be processed (logged), True otherwise (an empty file is skipped).
     """
     try:
         df = pd.read_parquet(input_file)
         initial_rows = len(df)
         if initial_rows == 0:
             logger.warning(f"File {input_file.name} is empty. Skipping.")
-            return
+            return True
 
         # 1. Essential Columns Check
         df = _synthesize_missing_columns(df)
@@ -149,9 +152,11 @@ def clean_telemetry_file(input_file: Path, output_file: Path) -> None:
         # Cleanup memory immediately
         del df
         gc.collect()
+        return True
 
     except Exception as e:
         logger.error(f"Error processing {input_file.name}: {e}")
+        return False
 
 
 def main() -> None:
@@ -172,9 +177,11 @@ def main() -> None:
         if file_to_process.exists():
             out_file = output_path / file_to_process.name
             logger.info(f"Processing specific file: {file_to_process.name}...")
-            clean_telemetry_file(file_to_process, out_file)
+            if not clean_telemetry_file(file_to_process, out_file):
+                sys.exit(1)
         else:
             logger.error(f"File not found: {args.file}")
+            sys.exit(1)
         return
 
     logger.info("Starting Batch Telemetry Data Cleaning Pipeline...")
@@ -182,6 +189,7 @@ def main() -> None:
 
     # Process all parquets in the raw data lake
     raw_files = list(input_path.glob("*.parquet"))
+    failed = []
 
     for i, file_path in enumerate(raw_files, 1):
         out_file = output_path / file_path.name
@@ -192,10 +200,14 @@ def main() -> None:
             continue
 
         logger.info(f"[{i}/{len(raw_files)}] Processing {file_path.name}...")
-        clean_telemetry_file(file_path, out_file)
+        if not clean_telemetry_file(file_path, out_file):
+            failed.append(file_path.name)
 
     logger.info("--- Data Cleaning Complete ---")
     logger.info(f"Clean Data Lake Size: {get_directory_size(output_path)}")
+    if failed:                                   # #50: failures used to exit 0
+        logger.error(f"{len(failed)} file(s) failed: {', '.join(failed)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

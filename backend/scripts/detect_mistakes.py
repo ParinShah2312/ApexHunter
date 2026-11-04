@@ -29,6 +29,7 @@ from isolation_forest.mistakes_io import (
     build_meta, corner_positions, load_and_validate, load_fastf1_session, save_outputs, select_laps,
     select_reference_drivers, slice_laps, traffic_mask,
 )
+from isolation_forest.mistakes_autoencoder import LSTMAutoencoderDetector
 from isolation_forest.mistakes_eval import ZScoreDetector, compare_detectors
 from isolation_forest.mistakes_events import assign_events, build_events, event_overlap, location_label
 from isolation_forest.mistakes_timeloss import (
@@ -55,44 +56,47 @@ def drop_traffic(df: pd.DataFrame, session, driver: str) -> pd.DataFrame:
 
 
 def compare_with_baseline(evaluation: dict, X: np.ndarray, df_driver: pd.DataFrame, time_check) -> dict:
-    """Z-score baseline vs Isolation Forest on the same planted folds and flag rate, how much the
-    two detectors' flags agree on the real laps, and the Z-score events' time-lost check
-    (`time_check(event_windows)` -> costly_share result)."""
+    """Z-score baseline vs Isolation Forest vs LSTM autoencoder on the same planted folds and flag
+    rate; on the real laps, how much the Z-score's and autoencoder's flags agree with the Isolation
+    Forest's, and their events' time-lost check (`time_check(event_windows)` -> costly_share)."""
     best = evaluation["best"]
     detectors = {"z_score": ZScoreDetector,
-                 "isolation_forest": lambda: ForestDetector(best["max_samples"], best["max_features"])}
+                 "isolation_forest": lambda: ForestDetector(best["max_samples"], best["max_features"]),
+                 "lstm_autoencoder": LSTMAutoencoderDetector}
     planted = compare_detectors(evaluation["folds"], detectors, CONTAMINATION)
 
-    z_scores = ZScoreDetector().fit(X).score(X)
-    z_flags = z_scores > np.quantile(z_scores, 1 - CONTAMINATION)
+    laps = df_driver["LapNumber"].to_numpy()
     if_flags = df_driver["is_mistake"].to_numpy()
-    z_events = assign_events(df_driver.assign(is_mistake=z_flags))
-    return {
-        "contamination": CONTAMINATION,
-        "planted": planted,
-        "z_score_time_lost_check": time_check(event_windows(df_driver, z_events)),
-        "real_laps": {
-            "z_score_flagged_samples": int(z_flags.sum()),
-            "z_score_events": int(len(np.unique(z_events[z_events >= 0]))),
-            "shared_flagged_samples": int((z_flags & if_flags).sum()),
-            "if_events_with_a_z_flag": round(event_overlap(df_driver["event_id"].to_numpy(), z_flags), 3),
-            "z_events_with_an_if_flag": round(event_overlap(z_events, if_flags), 3),
-        },
-    }
+    out = {"contamination": CONTAMINATION, "planted": planted, "real_laps": {}}
+    for name, short, det in (("z_score", "z", ZScoreDetector()), ("lstm_autoencoder", "ae", LSTMAutoencoderDetector())):
+        scores = det.fit(X, laps).score(X, laps)
+        flags = scores > np.quantile(scores, 1 - CONTAMINATION)
+        ev = assign_events(df_driver.assign(is_mistake=flags))
+        out[f"{name}_time_lost_check"] = time_check(event_windows(df_driver, ev))
+        out["real_laps"].update({
+            f"{name}_flagged_samples": int(flags.sum()),
+            f"{name}_events": int(len(np.unique(ev[ev >= 0]))),
+            f"if_events_with_a_{short}_flag": round(event_overlap(df_driver["event_id"].to_numpy(), flags), 3),
+            f"{short}_events_with_an_if_flag": round(event_overlap(ev, if_flags), 3),
+        })
+        if name == "z_score":
+            out["real_laps"]["shared_flagged_samples"] = int((flags & if_flags).sum())
+    return out
 
 
 def log_comparison(comparison: dict) -> None:
     for name, m in comparison["planted"].items():
         logger.info(f"{name:>16}: per-mistake precision={m['precision']:.3f}, "
                     f"recall={m['recall']:.3f}, F1={m['f1']:.3f}")
-    logger.info(f"Z-score events: costly share {comparison['z_score_time_lost_check']['costly_share']}")
     r = comparison["real_laps"]
-    logger.info(f"Real laps: Z-score {r['z_score_events']} events; {r['if_events_with_a_z_flag']:.0%} of IF events "
-                f"contain a Z-score flag, {r['z_events_with_an_if_flag']:.0%} of Z-score events an IF flag")
+    for name, short in (("z_score", "z"), ("lstm_autoencoder", "ae")):
+        logger.info(f"{name}: {r[f'{name}_events']} events on the real laps, costly share "
+                    f"{comparison[f'{name}_time_lost_check']['costly_share']}; {r[f'if_events_with_a_{short}_flag']:.0%} "
+                    f"of IF events contain one of its flags, {r[f'{short}_events_with_an_if_flag']:.0%} of its events an IF flag")
 
 
 def run_pipeline(session_path: str, driver: str, output_dir: Path, force: bool, compare: bool = False) -> None:
-    """End-to-end mistake-detection pipeline (compare=True adds the Z-score baseline comparison)."""
+    """End-to-end mistake-detection pipeline (compare=True adds the Z-score baseline and the LSTM autoencoder on the same planted mistakes)."""
     input_stem = Path(session_path).stem
     output_stem = f"{input_stem}_{driver}"
     parquet_out = output_dir / f"{output_stem}_mistakes.parquet"
@@ -193,7 +197,8 @@ def main() -> None:
     p.add_argument("--output-dir", type=str, default=None, help="Output directory.")
     p.add_argument("--force", action="store_true", default=False, help="Overwrite existing output.")
     p.add_argument("--compare", action="store_true", default=False,
-                   help="Also evaluate the Z-score baseline on the same planted mistakes (saved in the meta file).")
+                   help="Also evaluate the Z-score baseline and the LSTM autoencoder on the same planted "
+                        "mistakes (saved in the meta file).")
     args = p.parse_args()
     output_dir = Path(args.output_dir) if args.output_dir else DATA_LAKE_DIR / "mistake_data"
     try:

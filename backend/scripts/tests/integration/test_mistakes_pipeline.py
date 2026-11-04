@@ -112,6 +112,18 @@ class TestMistakesOnRealData(unittest.TestCase):
         flagged = int(self.df["is_mistake"].sum())
         self.assertAlmostEqual(cmp["real_laps"]["z_score_flagged_samples"], flagged, delta=0.01 * flagged)
 
+    def test_lstm_autoencoder_joins_the_same_comparison(self):
+        """§D: the LSTM autoencoder is scored on the same planted mistakes and flag rate as the other
+        two detectors, finds them well above chance, and flags 2 % of the real laps too."""
+        cmp = self.meta["comparison"]
+        ae, iso = cmp["planted"]["lstm_autoencoder"], cmp["planted"]["isolation_forest"]
+        self.assertEqual(ae["counts"]["planted"], iso["counts"]["planted"])
+        self.assertGreater(ae["recall"], 0.1)
+        self.assertGreater(ae["precision"], 0.2)
+        flagged = int(self.df["is_mistake"].sum())
+        self.assertAlmostEqual(cmp["real_laps"]["lstm_autoencoder_flagged_samples"], flagged, delta=0.02 * flagged)
+        self.assertIn("costly_share", cmp["lstm_autoencoder_time_lost_check"])
+
     def test_only_representative_laps_are_analysed(self):
         """Lap 1, pit laps and the last lap are excluded (Hamilton: in-laps 12 and 30, out-laps 13
         and 31, last lap 57, where drivers ease off)."""

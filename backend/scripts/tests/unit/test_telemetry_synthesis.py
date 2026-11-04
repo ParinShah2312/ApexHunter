@@ -58,7 +58,14 @@ class TestTelemetrySynthesis(unittest.TestCase):
 
     def test_missing_time_synthesized(self):
         result = self._run_with_missing_col("Time")
-        self.assertIn("Time", result.columns)
+        expected = pd.to_timedelta(np.arange(len(result)), unit="s")
+        self.assertTrue((result["Time"].to_numpy() == expected.to_numpy()).all())   # row index, in s
+
+    def test_unreadable_file_reported_as_failed(self):
+        """Regression for #50: a failed file was only logged, so the batch run exited 0."""
+        self.input_path.write_bytes(b"not a parquet file")
+        self.assertIs(clean_telemetry_file(self.input_path, self.output_path), False)
+        self.assertFalse(self.output_path.exists())
 
     def test_empty_file_skipped(self):
         empty = pd.DataFrame(columns=["Driver", "Speed", "RPM", "Throttle", "Brake",

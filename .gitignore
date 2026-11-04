@@ -32,3 +32,9 @@ Thumbs.db
 
 # Local assistant notes (not part of the submission)
 CLAUDE.md
+
+# Reference report/presentation from another project (not ours, not submitted)
+docs/REFERENCE/
+
+# Team guide for group members (viva prep; not submitted)
+TEAM_GUIDE.md

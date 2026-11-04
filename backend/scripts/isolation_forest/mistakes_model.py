@@ -49,11 +49,11 @@ class ForestDetector:
     def __init__(self, max_samples: float, max_features: float):
         self.max_samples, self.max_features = max_samples, max_features
 
-    def fit(self, X: np.ndarray) -> "ForestDetector":
+    def fit(self, X: np.ndarray, laps=None) -> "ForestDetector":
         self.model_ = fit_forest(X, self.max_samples, self.max_features)
         return self
 
-    def score(self, X: np.ndarray) -> np.ndarray:
+    def score(self, X: np.ndarray, laps=None) -> np.ndarray:
         return anomaly_scores(self.model_, X)
 
 
@@ -83,7 +83,7 @@ def evaluate_settings(df: pd.DataFrame, profile: pd.DataFrame, logger: logging.L
     for ms in MAX_SAMPLES_VALUES:
         for mf in MAX_FEATURES_VALUES:
             per_c: Dict[float, List[dict]] = {c: [] for c in CONTAMINATION_VALUES}
-            for X_train, tests in folds:
+            for X_train, tests, _ in folds:
                 det = ForestDetector(ms, mf).fit(X_train)
                 train_scores = det.score(X_train)
                 for test in tests:

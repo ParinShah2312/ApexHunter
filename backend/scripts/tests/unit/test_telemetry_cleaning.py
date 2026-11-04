@@ -28,7 +28,7 @@ class TestTelemetryCleaning(unittest.TestCase):
         n = 100
         df = pd.DataFrame({
             "Driver": ["1"] * n,
-            "Speed": [200.0] * 80 + [500.0] * 5 + [200.0] * 5 + [float('nan')] * 10,
+            "Speed": [200.0] * 80 + [500.0] * 5 + [-20.0] * 5 + [float('nan')] * 10,
             "RPM": [8000.0] * 80 + [8000.0] * 5 + [20000.0] * 5 + [float('nan')] * 10,
             "Throttle": [50.0] * 80 + [150.0] * 5 + [50.0] * 10 + [float('nan')] * 5,
             "Brake": [0.0] * 80 + [-10.0] * 3 + [1.0] * 6 + [5.0] * 6 + [float('nan')] * 5,
@@ -49,24 +49,15 @@ class TestTelemetryCleaning(unittest.TestCase):
     def test_null_rows_dropped(self):
         self.assertEqual(len(self.output_df), 90)
 
-    def test_speed_clipped_upper(self):
-        self.assertLessEqual(self.output_df["Speed"].max(), 380.0)
-
-    def test_speed_clipped_lower(self):
-        self.assertGreaterEqual(self.output_df["Speed"].min(), 0.0)
-
-    def test_rpm_clipped(self):
-        self.assertLessEqual(self.output_df["RPM"].max(), 15000.0)
-
-    def test_throttle_clipped_upper(self):
-        self.assertLessEqual(self.output_df["Throttle"].max(), 100.0)
-
-    def test_brake_clipped_lower(self):
-        self.assertGreaterEqual(self.output_df["Brake"].min(), 0.0)
-
-    def test_brake_clipped_upper_to_binary_range(self):
-        """Brake is an on/off flag, so cleaned values must stay within 0–1."""
-        self.assertLessEqual(self.output_df["Brake"].max(), 1.0)
+    def test_every_channel_is_clipped_to_its_physical_range(self):
+        """Each limit is reached exactly (the input breaks every one), so removing any clip fails:
+        speed 0-380 km/h, RPM <= 15,000, throttle <= 100 %, brake 0-1 (an on/off flag)."""
+        out = self.output_df
+        self.assertEqual((out["Speed"].min(), out["Speed"].max()), (0.0, 380.0))
+        self.assertEqual(out["RPM"].max(), 15000.0)
+        self.assertEqual(out["Throttle"].max(), 100.0)
+        self.assertEqual((out["Brake"].min(), out["Brake"].max()), (0.0, 1.0))
+        self.assertEqual(out["Speed"].iloc[0], 200.0)                 # in-range values untouched
 
     def test_ffill_fills_partial_nulls(self):
         """Builds a separate DataFrame with partial nulls (not all-core NaN)."""

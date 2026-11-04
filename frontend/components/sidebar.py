@@ -114,7 +114,7 @@ def _derive_output_paths(session_filepath: str, driver_number: str) -> Dict[str,
         "mistake_parquet": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes.parquet"),
         "mistake_meta": str(MISTAKE_DATA_DIR / f"{output_stem}_mistakes_meta.json"),
         "racing_line": str(RACING_LINES_DIR / f"{output_stem}_racing_line.json"),
-        "tyre_prediction": str(TYRE_PREDICTIONS_DIR / f"{output_stem}_tyre.json"),
+        "tyre_prediction": str(TYRE_PREDICTIONS_DIR / f"{output_stem}_strategy.json"),
     }
 
 
@@ -191,10 +191,10 @@ def render_sidebar() -> SidebarSelections:
         unsafe_allow_html=True,
     )
 
-    # LSTM Tyre Cliff
-    lstm_exists = Path(tyre_prediction_path).exists()
+    # Tyre pace + pit window (predict_strategy.py)
+    strategy_exists = Path(tyre_prediction_path).exists()
     st.sidebar.markdown(
-        f"{_status_dot(lstm_exists)} LSTM Tyre Cliff",
+        f"{_status_dot(strategy_exists)} Tyre Pace + Pit Window",
         unsafe_allow_html=True,
     )
 

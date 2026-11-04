@@ -44,10 +44,6 @@ def _import_by_path(rel_path: str) -> subprocess.CompletedProcess:
 
 class TestScriptEntrypoints(unittest.TestCase):
 
-    def test_all_entry_scripts_exist(self):
-        for rel in ENTRY_SCRIPTS:
-            self.assertTrue((SCRIPTS_DIR / rel).exists(), rel)
-
     def test_entry_scripts_import_when_run_by_path(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             results = dict(zip(ENTRY_SCRIPTS, pool.map(_import_by_path, ENTRY_SCRIPTS)))

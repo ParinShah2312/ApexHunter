@@ -1,5 +1,5 @@
-"""Unit tests for lstm/tyre_model.py: the LSTM learns, search reports truthfully, evaluation
-de-normalises correctly, MC-dropout uncertainty, and the cliff-lap rule."""
+"""Unit tests for lstm/tyre_model.py: the LSTM and the vanilla RNN learn, the search reports
+truthfully, and predictions are de-normalised to lap-time changes in seconds."""
 
 import logging
 import sys
@@ -16,8 +16,7 @@ import torch.nn as nn
 
 from lstm.tyre_data import SEQUENCE_LENGTH
 from lstm.tyre_model import (
-    INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, evaluate_on_test, monte_carlo_predict,
-    run_hyperparameter_search, train_one_config,
+    INPUT_SIZE, NUM_LAYERS, TyrePaceRNN, run_hyperparameter_search, sequence_predictor, train_one_config,
 )
 
 LOG = logging.getLogger("test_tyre_model")
@@ -42,6 +41,16 @@ class TestTraining(unittest.TestCase):
         baseline = float(np.mean((y[320:] - y[:320].mean()) ** 2))   # predict the mean
         self.assertLess(val_mse, 0.3 * baseline)
 
+    def test_rnn_cell_is_a_plain_rnn_and_learns_the_same_signal(self) -> None:
+        """§D: cell="rnn" must really swap the recurrent layer (the RNN vs LSTM comparison)."""
+        X, y = _learnable()
+        model, val_mse = train_one_config(X[:320], y[:320], X[320:], y[320:], hidden_size=32,
+                                          learning_rate=0.01, n_epochs=25, logger=LOG, cell="rnn")
+        self.assertIsInstance(model.lstm, nn.RNN)
+        self.assertNotIsInstance(model.lstm, nn.LSTM)
+        baseline = float(np.mean((y[320:] - y[:320].mean()) ** 2))
+        self.assertLess(val_mse, 0.3 * baseline)
+
     def test_search_reports_the_true_score_of_its_choice(self) -> None:
         X, y = _learnable(200)
         grid = [{"hidden_size": 8, "learning_rate": 0.0001}, {"hidden_size": 32, "learning_rate": 0.01}]
@@ -51,33 +60,20 @@ class TestTraining(unittest.TestCase):
         self.assertAlmostEqual(best_mse, rerun_mse, places=5)       # training is seeded
 
 
-class _Constant(nn.Module):
-    def forward(self, x):
-        return torch.zeros(x.shape[0])
+class TestPredictor(unittest.TestCase):
 
-
-class TestEvaluation(unittest.TestCase):
-
-    def test_mae_is_reported_in_km_h(self) -> None:
-        y_mean, y_std = 200.0, 10.0
-        y_test_norm = np.array([1.0, -2.0, 0.5], dtype=np.float32)   # 210, 180, 205 km/h
-        mae = evaluate_on_test(_Constant(), np.zeros((3, SEQUENCE_LENGTH, INPUT_SIZE), np.float32),
-                               y_test_norm, y_mean, y_std)
-        self.assertAlmostEqual(mae, (10 + 20 + 5) / 3, places=4)    # model always predicts 200
-
-
-class TestMonteCarloDropout(unittest.TestCase):
-
-    def test_band_contains_mean_varies_and_restores_eval_mode(self) -> None:
-        torch.manual_seed(0)
-        model = TyreCliffLSTM(INPUT_SIZE, 32, NUM_LAYERS, 0.5)
-        X = np.random.RandomState(0).rand(10, SEQUENCE_LENGTH, INPUT_SIZE).astype(np.float32)
-        mean, lower, upper = monte_carlo_predict(model, X, n_samples=20)
-        self.assertEqual(mean.shape, (10,))
-        self.assertTrue(np.all(lower <= mean) and np.all(mean <= upper))
-        self.assertTrue(np.all(upper - lower > 0))                  # dropout really was active
-        self.assertFalse(model.training)
-
+    def test_predictions_are_lap_time_changes_in_seconds(self) -> None:
+        """The strategy check and output get changes in s: scaled inputs in, de-normalised out."""
+        from sklearn.preprocessing import StandardScaler
+        windows = np.random.RandomState(0).rand(3, SEQUENCE_LENGTH, INPUT_SIZE).astype(np.float32)
+        scaler = StandardScaler().fit(windows.reshape(-1, INPUT_SIZE))
+        model = TyrePaceRNN(INPUT_SIZE, 8, NUM_LAYERS, 0.0)
+        with torch.no_grad():                                      # output layer set to 0: the real
+            model.fc.weight.zero_(); model.fc.bias.zero_()         # model then predicts exactly 0
+        out = sequence_predictor(model, scaler, y_mean=0.05, y_std=0.9)(windows)
+        np.testing.assert_allclose(out, [0.05, 0.05, 0.05], atol=1e-7)   # 0 normalised = the mean
+        model.fc.bias.data.fill_(1.0)                              # +1 normalised = mean + one std
+        np.testing.assert_allclose(sequence_predictor(model, scaler, 0.05, 0.9)(windows), [0.95] * 3, atol=1e-6)
 
 
 if __name__ == "__main__":

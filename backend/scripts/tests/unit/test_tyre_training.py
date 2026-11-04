@@ -20,7 +20,7 @@ import torch.nn as nn
 from lstm.tyre_data import SEQUENCE_LENGTH, session_sort_key
 from lstm.tyre_io import load_model_artifacts, save_model_artifacts
 from lstm.tyre_model import (
-    DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, split_by_groups, train_one_config,
+    DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyrePaceRNN, split_by_groups, train_one_config,
 )
 from train_lstm import fit_scalers
 
@@ -98,18 +98,20 @@ class TestModelCompatibilityCheck(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _save(self, input_size: int, features=None) -> None:
-        model = TyreCliffLSTM(input_size, 16, NUM_LAYERS, DROPOUT_RATE)
+    def _save(self, input_size: int, features=None, target=None) -> None:
+        model = TyrePaceRNN(input_size, 16, NUM_LAYERS, DROPOUT_RATE)
         scaler = StandardScaler().fit(np.random.rand(20, input_size))
         config = {"hidden_size": 16, "input_size": input_size, "sequence_length": SEQUENCE_LENGTH,
                   "y_mean": 0.0, "y_std": 1.0}
         if features is not None:
             config["features"] = features
+        if target is not None:
+            config["target"] = target
         save_model_artifacts(model, scaler, config, self.tmp, self.logger)
 
     def test_old_input_size_raises_clear_error(self) -> None:
         self._save(INPUT_SIZE - 1)
-        with self.assertRaisesRegex(ValueError, "train_lstm.py --force"):
+        with self.assertRaisesRegex(ValueError, "train_lstm.py --cell lstm --force"):
             load_model_artifacts(self.tmp, self.logger)
 
     def test_feature_name_mismatch_raises(self) -> None:
@@ -117,11 +119,34 @@ class TestModelCompatibilityCheck(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_model_artifacts(self.tmp, self.logger)
 
-    def test_matching_model_loads(self) -> None:
+    def test_model_trained_on_absolute_speed_raises(self) -> None:
+        """#45: an older model predicts absolute speed (no 'target' recorded); prediction now
+        adds the output to the previous lap's speed, so such a model must be refused."""
         from lstm.tyre_data import LAP_FEATURES
         self._save(INPUT_SIZE, features=LAP_FEATURES)
+        with self.assertRaisesRegex(ValueError, "target"):
+            load_model_artifacts(self.tmp, self.logger)
+
+    def test_matching_model_loads(self) -> None:
+        from lstm.tyre_data import LAP_FEATURES, TARGET
+        self._save(INPUT_SIZE, features=LAP_FEATURES, target=TARGET)
         model, scaler, config = load_model_artifacts(self.tmp, self.logger)
-        self.assertIsInstance(model, TyreCliffLSTM)
+        self.assertIsInstance(model, TyrePaceRNN)
+
+    def test_rnn_is_saved_and_loaded_as_an_rnn_next_to_the_lstm(self) -> None:
+        """§D: the vanilla RNN has its own files and is rebuilt with an RNN layer, not an LSTM."""
+        from lstm.tyre_data import LAP_FEATURES, TARGET
+        self._save(INPUT_SIZE, features=LAP_FEATURES, target=TARGET)                   # LSTM
+        rnn = TyrePaceRNN(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE, cell="rnn")
+        config = {"cell": "rnn", "hidden_size": 16, "input_size": INPUT_SIZE, "features": LAP_FEATURES,
+                  "target": TARGET, "sequence_length": SEQUENCE_LENGTH, "y_mean": 0.0, "y_std": 1.0}
+        save_model_artifacts(rnn, StandardScaler().fit(np.random.rand(20, INPUT_SIZE)), config,
+                             self.tmp, self.logger, cell="rnn")
+        loaded, _, cfg = load_model_artifacts(self.tmp, self.logger, cell="rnn")
+        self.assertIsInstance(loaded.lstm, nn.RNN)
+        self.assertNotIsInstance(loaded.lstm, nn.LSTM)
+        lstm, _, _ = load_model_artifacts(self.tmp, self.logger)                       # untouched
+        self.assertIsInstance(lstm.lstm, nn.LSTM)
 
 
 if __name__ == "__main__":

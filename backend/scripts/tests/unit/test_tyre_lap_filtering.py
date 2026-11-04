@@ -1,7 +1,8 @@
 """Regression tests for LSTM lap filtering: out/in-laps, lap 1 and neutralised (SC/VSC/red)
-laps must be excluded, windows must never bridge a removed lap, and prediction must not
-overwrite the first lap's features."""
+laps must be excluded, windows must never bridge a removed lap, and predictions exist only where a
+full 5-lap window does."""
 
+import copy
 import logging
 import sys
 import unittest
@@ -18,7 +19,8 @@ from lstm.tyre_data import (
     LAP_FEATURES, SEQUENCE_LENGTH, _consecutive_runs, extract_stints, representative_lap_mask,
     window_positions,
 )
-from lstm.tyre_model import DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyreCliffLSTM, predict_single_stint
+from lstm.tyre_model import DROPOUT_RATE, INPUT_SIZE, NUM_LAYERS, TyrePaceRNN, sequence_predictor
+from strategy.strategy_check import predicted_changes
 
 LAP_SECONDS = 90.0
 
@@ -126,49 +128,32 @@ class TestWindowPositions(unittest.TestCase):
         self.assertEqual(window_positions(laps, 5), [5, 6, 12, 13])
 
 
-def _model_and_scaler():
-    model = TyreCliffLSTM(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE)
+def _predict():
+    """A real (untrained) recurrent model behind the same predictor the strategy code uses."""
     scaler = StandardScaler().fit(np.random.RandomState(0).rand(30, INPUT_SIZE))
-    return model, scaler
+    return sequence_predictor(TyrePaceRNN(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE), scaler, 0.0, 1.0)
 
 
 class TestPredictionWindows(unittest.TestCase):
     """Regression for #20/#21: predictions used padded copies of the first lap, bridged removed
-    laps and dropped stints too short for a training window."""
+    laps and dropped stints too short for a training window. Now checked on
+    strategy_check.predicted_changes, which feeds the pit window and the dashboard."""
 
     def test_predictions_only_where_a_real_window_exists(self) -> None:
         status = ["1"] * 16
         status[8] = "4"                                     # lap 9 under safety car
-        stint = extract_stints(_laps(range(1, 17), track_status=status), _telemetry(16), _silent_logger())[0]
-        result = predict_single_stint(stint, *_model_and_scaler(), 230.0, 10.0, SEQUENCE_LENGTH)
-        predicted = [lap for lap, p in zip(result["lap_numbers"], result["predicted_laps"]) if p is not None]
-        self.assertEqual(predicted, [7, 8, 15, 16])
-        for key in ("confidence_lower", "confidence_upper"):
-            self.assertEqual([p is None for p in result[key]], [p is None for p in result["predicted_laps"]])
+        stints = extract_stints(_laps(range(1, 17), track_status=status), _telemetry(16), _silent_logger())
+        before = copy.deepcopy(stints[0]["lap_features"])
+        changes = predicted_changes(stints, _predict())
+        # laps 7-8 and 15-16 have 5 clean laps before them; so do 9 (the safety-car lap) and 17 (the
+        # lap after the stint): whether a lap turns out clean is only known after it (#52)
+        self.assertEqual(sorted(changes), [7, 8, 9, 15, 16, 17])
+        self.assertEqual(stints[0]["lap_features"], before)  # inputs not modified by prediction
 
-    def test_short_stint_reported_without_predictions(self) -> None:
-        stint = extract_stints(_laps(range(2, 7)), _telemetry(6), _silent_logger())[0]
-        result = predict_single_stint(stint, *_model_and_scaler(), 230.0, 10.0, SEQUENCE_LENGTH)
-        self.assertEqual(result["lap_numbers"], [2, 3, 4, 5, 6])
-        self.assertEqual(result["predicted_laps"], [None] * 5)
-        self.assertEqual(len([t for t in result["actual_laps"] if t is not None]), 5)
-        self.assertIsNone(result["cliff_lap"])
-        self.assertIsNone(result["laps_remaining"])
-
-
-class TestPredictionUsesRealFirstLap(unittest.TestCase):
-
-    def test_first_lap_kept_and_lap_numbers_reported(self) -> None:
-        stints = extract_stints(_laps(range(1, 12)), _telemetry(11), _silent_logger())
-        stint = stints[0]
-        model = TyreCliffLSTM(INPUT_SIZE, 16, NUM_LAYERS, DROPOUT_RATE)
-        scaler = StandardScaler().fit(np.random.RandomState(0).rand(30, INPUT_SIZE))
-        result = predict_single_stint(stint, model, scaler, 230.0, 10.0, SEQUENCE_LENGTH)
-        self.assertEqual(result["lap_numbers"], list(range(2, 12)))
-        self.assertEqual(len(result["predicted_laps"]), len(result["lap_numbers"]))
-        # The input features must not have been mutated (old code copied lap 2 over lap 1)
-        speeds = stint["lap_features"]["mean_speed"]
-        self.assertNotAlmostEqual(speeds[0], speeds[1], places=3)
+    def test_short_stint_gets_no_prediction(self) -> None:
+        stints = extract_stints(_laps(range(2, 6)), _telemetry(5), _silent_logger())
+        self.assertEqual(stints[0]["n_laps"], 4)                  # fewer than 5 clean laps
+        self.assertEqual(predicted_changes(stints, _predict()), {})
 
 
 if __name__ == "__main__":

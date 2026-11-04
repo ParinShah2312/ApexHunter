@@ -1,6 +1,8 @@
 """
 ApexHunter Frontend - AI Analysis
-Renders the AI Analysis tab with Isolation Forest panel (left) and LSTM placeholder (right).
+Renders the AI Analysis tab: Isolation Forest mistake events (left) and the tyre pace / pit window
+output of predict_strategy.py (right). Both are minimal views to check the models; the full design
+comes with the UI redesign (ROADMAP §E).
 """
 
 from typing import List, Optional, Tuple
@@ -12,120 +14,6 @@ import streamlit as st
 from config import DRIVER_MAPPING
 from components.data_loader import downsample
 
-
-
-def stint_lap_axis(stint: dict) -> Tuple[List[int], str]:
-    """Return (x values, axis title) for a stint chart.
-
-    Newer prediction files store the race lap number of every kept lap (non-representative laps
-    such as safety-car laps are skipped, so numbers can have gaps). Older files fall back to
-    1..n_laps "lap in stint".
-    """
-    if stint.get("lap_numbers"):
-        return list(stint["lap_numbers"]), "Race lap"
-    return list(range(1, stint["n_laps"] + 1)), "Lap in stint"
-
-
-def stint_cliff_label(stint: dict) -> Optional[str]:
-    """Human-readable cliff lap (race lap number when available), or None."""
-    cliff_lap = stint.get("cliff_lap")
-    if cliff_lap is None:
-        return None
-    lap_nums, _ = stint_lap_axis(stint)
-    return str(lap_nums[min(cliff_lap, len(lap_nums) - 1)])
-
-
-def _build_tyre_cliff_figure(stint: dict) -> go.Figure:
-    """Build the full tyre cliff Plotly figure for one stint."""
-    lap_nums, x_title = stint_lap_axis(stint)
-    actual_time = stint["actual_laps"]
-    predicted_time = stint["predicted_laps"]
-    upper_time = stint["confidence_upper"]
-    lower_time = stint["confidence_lower"]
-    cliff_lap = stint.get("cliff_lap")
-
-    def lap_color(i: int, total: int) -> str:
-        ratio = i / max(1, total - 1)
-        r = int(ratio * 255)
-        g = int((1 - ratio) * 255)
-        return f"rgb({r},{g},100)"
-
-    fig = go.Figure()
-
-    # Actual pace
-    for i in range(len(actual_time) - 1):
-        fig.add_trace(go.Scatter(
-            x=[lap_nums[i], lap_nums[i + 1]],
-            y=[actual_time[i], actual_time[i + 1]],
-            mode="lines",
-            line=dict(color=lap_color(i, len(actual_time)), width=2.5),
-            showlegend=(i == 0),
-            name="Actual lap time" if i == 0 else None,
-            hovertemplate=f"Lap {lap_nums[i]}: %{{y:.2f}} s<extra></extra>",
-        ))
-
-    # Predicted trace
-    pred_x = [lap_nums[i] for i, v in enumerate(predicted_time) if v is not None]
-    pred_y = [v for v in predicted_time if v is not None]
-    if pred_x:
-        fig.add_trace(go.Scatter(
-            x=pred_x, y=pred_y,
-            mode="lines",
-            line=dict(color="#a855f7", width=1.5, dash="dash"),
-            name="LSTM prediction",
-            hovertemplate="Predicted: %{y:.2f} s<extra></extra>",
-        ))
-
-    # Confidence band
-    upper_x = [lap_nums[i] for i, v in enumerate(upper_time) if v is not None]
-    upper_y = [v for v in upper_time if v is not None]
-    lower_x = [lap_nums[i] for i, v in enumerate(lower_time) if v is not None]
-    lower_y = [v for v in lower_time if v is not None]
-    if upper_x and lower_x:
-        fig.add_trace(go.Scatter(
-            x=upper_x + lower_x[::-1],
-            y=upper_y + lower_y[::-1],
-            fill="toself",
-            fillcolor="rgba(168,85,247,0.10)",
-            line=dict(color="rgba(0,0,0,0)"),
-            hoverinfo="skip",
-            showlegend=False,
-            name="confidence_band",
-        ))
-
-    # Cliff vertical line
-    if cliff_lap is not None:
-        cliff_x = lap_nums[cliff_lap] if cliff_lap < len(lap_nums) else lap_nums[-1]
-        fig.add_vline(
-            x=cliff_x,
-            line=dict(color="#ff3a3a", width=1.5, dash="dot"),
-            annotation_text=f"CLIFF LAP {stint_cliff_label(stint)}",
-            annotation_position="top right",
-            annotation_font=dict(color="#ff3a3a", size=10),
-        )
-
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="#0d1520",
-        height=300,
-        margin=dict(t=20, b=30, l=50, r=20),
-        xaxis=dict(
-            title=x_title,
-            tickfont=dict(color="#6b7890"),
-            gridcolor="rgba(255,255,255,0.04)",
-        ),
-        yaxis=dict(
-            title="Lap Time (s)",
-            tickfont=dict(color="#6b7890"),
-            gridcolor="rgba(255,255,255,0.04)",
-        ),
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#6b7890", size=11),
-        ),
-        showlegend=True,
-    )
-    return fig
 
 
 def mistake_rate_pct(df: pd.DataFrame) -> float:
@@ -156,6 +44,7 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
             "Run: `python backend/scripts/detect_mistakes.py --session <path> --driver <code>`"
         )
         return
+    has_event_list = events is not None
     events = events or []
 
     contamination = meta["best_contamination"]
@@ -237,97 +126,159 @@ def _render_isolation_forest_column(df_mistakes: Optional[pd.DataFrame], meta: O
                 "why": "Why it was flagged"}),
             hide_index=True, width="stretch",
         )
+    elif has_event_list:
+        st.info("No mistake events in this session: no run of flags lasted 0.5 s or more.")
     else:
         st.info("No event list for this output. Re-run detect_mistakes.py with --force.")
 
 
-def _render_lstm_column(tyre_data: Optional[dict]) -> None:
-    """Render the LSTM Tyre Cliff chart card including stint selector and stats."""
-    st.markdown("**LSTM TYRE CLIFF PREDICTOR**")
+SOURCE_NAMES = {"no_change": '"No change" (fuel only)', "laps_driven": "Laps driven (real lap times)",
+                "ridge": "Ridge", "rnn": "RNN", "lstm": "LSTM"}
+WINDOW_COLOUR = "rgba(0,255,136,0.13)"
+NEUTRAL_COLOUR = "rgba(255,200,0,0.16)"
 
-    if tyre_data is None:
-        st.warning(
-            "No tyre prediction found for this session and driver.\n\n"
-            "**Step 1 — Train the model** (only needed once):\n"
-            "```\npython backend/scripts/train_lstm.py\n```\n\n"
-            "**Step 2 — Run prediction**:\n"
-            "```\npython backend/scripts/predict_cliff.py "
-            "--session data_lake/clean_data/<file>.parquet "
-            "--driver <code>\n```"
-        )
 
-        fig_placeholder = go.Figure()
-        fig_placeholder.add_annotation(
-            text="LSTM output will appear here",
-            showarrow=False,
-            font=dict(color="#3a4558", size=14),
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-        )
-        fig_placeholder.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="#0f1217",
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=300,
-            margin=dict(t=10, b=10, l=10, r=10),
-        )
-        st.plotly_chart(fig_placeholder, width='stretch')
-        return
-
-    # ── Stint selector ────────────────────────────────────────────
-    stints = tyre_data.get("stints", [])
-    if len(stints) == 0:
-        st.warning("Prediction file exists but contains no stint data.")
-        return
-
-    stint_options = [
-        f"Stint {s['stint_index'] + 1} ({s['n_laps']} laps)"
-        for s in stints
-    ]
-    selected_stint_label = st.selectbox(
-        "Select stint", options=stint_options, key="tyre_stint_selector", filter_mode=None
-    )
-    selected_idx = stint_options.index(selected_stint_label)
-    stint = stints[selected_idx]
-
-    fig = _build_tyre_cliff_figure(stint)
-    st.plotly_chart(fig, width='stretch')
-
-    # Stat cards - 2x2 grid for better readability
-    c1, c2 = st.columns(2)
-    with c1:
-        cliff_label = stint_cliff_label(stint)
-        st.metric(
-            "Predicted Cliff",
-            f"Lap {cliff_label}" if cliff_label is not None else "—",
-        )
-    with c2:
-        lr = stint.get("laps_remaining")
-        st.metric("Laps Remaining", str(lr) if lr is not None else "—")
-
-    st.write("") # small spacing
-    c3, c4 = st.columns(2)
-    with c3:
-        actual_time = stint["actual_laps"]
-        valid_actuals = [t for t in actual_time if t is not None]
-        current_pace = f"{valid_actuals[-1]:.2f}s" if valid_actuals else "—"
-        st.metric("Current Pace", current_pace)
-    with c4:
-        predicted_time = stint["predicted_laps"]
-        valid_preds = [t for t in predicted_time if t is not None]
-        if valid_actuals and valid_preds:
-            proj_pace = valid_preds[-1]
-            diff = proj_pace - valid_actuals[-1]
-            # Lap time: lower is better, so a negative delta (faster) is green and positive red.
-            # "inverse" is exactly that; switching modes by sign made both cases red.
-            st.metric("Proj. End Pace", f"{proj_pace:.2f}s", f"{diff:+.2f}s", delta_color="inverse")
+def lap_runs(laps: List[int]) -> List[Tuple[int, int]]:
+    """[13, 14, 15, 20] -> [(13, 15), (20, 20)] (for shading)."""
+    runs: List[Tuple[int, int]] = []
+    for n in sorted(laps):
+        if runs and n == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], n)
         else:
-            st.metric("Proj. End Pace", "—")
+            runs.append((n, n))
+    return runs
 
 
+def lap_ranges_text(laps: List[int]) -> str:
+    return ", ".join(f"{a}-{b}" if b > a else f"{a}" for a, b in lap_runs(laps))
+
+
+def strategy_chart_laps(data: dict, stint: dict) -> List[dict]:
+    """Lap rows shown for a stint: only the stint's own laps (user, 2026-11-03)."""
+    return [r for r in data["laps"] if stint["first_lap"] <= r["lap"] <= stint["last_lap"]]
+
+
+def is_racing_lap(row: dict, stint: dict) -> bool:
+    """A normal racing lap: not lap 1, not the out-lap (stint's first lap after a stop), not the
+    in-lap, not under SC/VSC/red. Only these are joined by the lap-time line."""
+    out_lap = stint["first_lap"] if stint["first_lap"] > 1 else None
+    return (row["lap"] != 1 and row["lap"] != out_lap and not row["pit_in"]
+            and row["track"] == "green" and row["lap_time"] is not None)
+
+
+def _build_strategy_figure(data: dict, stint: dict) -> go.Figure:
+    rows = strategy_chart_laps(data, stint)
+    first, last = stint["first_lap"], stint["last_lap"]
+    fig = go.Figure()
+    for a, b in lap_runs([r["lap"] for r in rows if r["track"] != "green"]):
+        fig.add_vrect(x0=a - 0.5, x1=b + 0.5, fillcolor=NEUTRAL_COLOUR, line_width=0, layer="below")
+    for a, b in lap_runs([n for n in stint.get("window", []) if first <= n <= last]):
+        fig.add_vrect(x0=a - 0.5, x1=b + 0.5, fillcolor=WINDOW_COLOUR, line_width=0, layer="below")
+
+    racing = [r for r in rows if is_racing_lap(r, stint)]
+    green = sorted(r["lap_time"] for r in racing)
+    yaxis = dict(title="Lap time (s)", tickfont=dict(color="#6b7890"), gridcolor="rgba(255,255,255,0.04)")
+    top = None
+    if len(green) >= 3:
+        top = green[len(green) // 2] + 3.0
+        yaxis["range"] = [green[0] - 0.5, top + 0.3]
+    # the line joins only normal racing laps; it breaks across the other laps
+    fig.add_trace(go.Scatter(
+        x=[r["lap"] for r in rows], y=[r["lap_time"] if r in racing else None for r in rows],
+        mode="lines+markers", line=dict(color="#e2e8f0", width=2), marker=dict(size=4),
+        name="Real lap time", hovertemplate="Lap %{x}: %{y:.2f} s<extra></extra>", connectgaps=False))
+    # lap 1, out-lap, in-lap and SC/VSC laps: grey markers, held at the top edge if off the chart
+    other = [r for r in rows if r not in racing and r["lap_time"] is not None]
+    if other:
+        fig.add_trace(go.Scatter(
+            x=[r["lap"] for r in other],
+            y=[min(r["lap_time"], top) if top else r["lap_time"] for r in other],
+            mode="markers", marker=dict(color="#6b7890", size=6, symbol="circle-open"),
+            name="Lap 1 / pit / SC lap", text=[f"{r['lap_time']:.2f} s" for r in other],
+            hovertemplate="Lap %{x}: %{text}<extra></extra>"))
+    pred = [r for r in rows if r["predicted_lap_time"] is not None]
+    if pred:
+        fig.add_trace(go.Scatter(
+            x=[r["lap"] for r in pred], y=[r["predicted_lap_time"] for r in pred], mode="markers",
+            marker=dict(color="#a855f7", size=6, symbol="diamond"), name=f"Predicted ({SOURCE_NAMES.get(data['model'], data['model'])})",
+            hovertemplate="Lap %{x}: predicted %{y:.2f} s<extra></extra>"))
+    best = stint.get("best_lap")
+    if best and first <= best <= last:
+        fig.add_vline(x=best, line=dict(color="#00ff88", width=1.5, dash="dot"),
+                      annotation_text=f"Best {best}", annotation_position="top left",
+                      annotation_font=dict(color="#00ff88", size=10))
+    if stint.get("actual_stop"):
+        fig.add_vline(x=stint["actual_stop"], line=dict(color="#ff3a3a", width=1.5),
+                      annotation_text=f"Pitted {stint['actual_stop']}", annotation_position="top right",
+                      annotation_font=dict(color="#ff3a3a", size=10))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#0d1520", height=300,
+        margin=dict(t=25, b=30, l=50, r=20), yaxis=yaxis,
+        xaxis=dict(title="Race lap", range=[first - 0.5, last + 0.5], tickfont=dict(color="#6b7890"),
+                   gridcolor="rgba(255,255,255,0.04)"),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6b7890", size=11), orientation="h", y=-0.25),
+    )
+    return fig
+
+
+def _render_strategy_column(data: Optional[dict]) -> None:
+    """Tyre pace + pit window card (ROADMAP §C step 8): stint chart with the window (green),
+    safety-car/VSC laps (yellow), best and real stop, the readable summary and a few numbers."""
+    st.markdown("**TYRE PACE · PIT WINDOW**")
+    if data is None:
+        st.warning(
+            "No pit strategy output for this session and driver.\n\n"
+            "Run (races only; `check_strategy.py` must have been run once, it picks the wear source):\n"
+            "```\npython backend/scripts/predict_strategy.py "
+            "--session data_lake/clean_data/<file>.parquet --driver <number>\n```")
+        return
+    cost = data["pit_cost"]
+    trained = {True: " · race was in the model's training data", False: " · held-out test race"}
+    st.caption(
+        f"Wear from: {SOURCE_NAMES.get(data['model'], data['model'])}"
+        + trained.get(data.get("in_training_data"), "")
+        + f" · pit stop costs {cost['normal_s']:.1f} s ({cost['sc_vsc_s']:.1f} s under SC/VSC)")
+    scores = data.get("strategy_scores")
+    if scores:
+        table = pd.DataFrame([
+            {"Wear from": SOURCE_NAMES.get(k, k) + (" (shown)" if k == data["model"] else ""),
+             "Real stop in window": f"{v['hit_pct']:.0f} %", "Random 5-lap window": f"{v['random_pct']:.0f} %",
+             "Margin": round(v["hit_pct"] - v["random_pct"], 1)}
+            for k, v in scores.items()]).sort_values("Margin", ascending=False)
+        with st.expander("Pit window scores on the test races (best margin is shown)"):
+            st.dataframe(table, hide_index=True, width="stretch")
+
+    stints = data.get("stints", [])
+    if not stints:
+        st.warning("The output file has no stints.")
+        return
+    labels = [f"Stint {s['stint']} · {s['compound']} · laps {s['first_lap']}-{s['last_lap']}" for s in stints]
+    stint = stints[labels.index(st.selectbox("Select stint", labels, key="tyre_stint_selector",
+                                             filter_mode=None))]
+
+    st.plotly_chart(_build_strategy_figure(data, stint), width="stretch")
+    if "summary" not in stint:
+        st.info("No pit advice for this stint (last stint, wet tyres, or no prediction yet).")
+        return
+    st.markdown("\n".join(f"- {line}" for line in stint["summary"]))
+    after = [n for n in stint["window"] if n > stint["last_lap"]]
+    if after:
+        st.caption(f"Window laps after the real stop ({lap_ranges_text(after)}) assume he had stayed "
+                   f"out; the chart shows only this stint's laps.")
+    # wear the model believed when the driver really pitted (after the stop it stays frozen)
+    at_stop = next((a for a in stint["advice"] if a["lap"] == stint["actual_stop"]), None)
+    wear_text = (f"{at_stop['wear_s']:.3f} s/lap" if at_stop and not at_stop.get("no_wear_signal")
+                 else "no signal")
+    n_window = len(stint["window"])
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Real stop", f"Lap {stint['actual_stop']}", "in window" if stint["hit"] else "outside window",
+                  delta_color="normal" if stint["hit"] else "inverse")
+    with c2:
+        st.metric("Window", f"{n_window} lap{'s' if n_window != 1 else ''}",
+                  f"random hit {100 * stint['random_hit_chance']:.0f} %", delta_color="off")
+    with c3:
+        st.metric("Wear at real stop", wear_text)
 
 
 def render_ai_analysis(
@@ -338,11 +289,11 @@ def render_ai_analysis(
     tyre_data: Optional[dict] = None,
     mistake_events: Optional[dict] = None,
 ) -> None:
-    """Renders the AI Analysis tab content."""
+    """Renders the AI Analysis tab content (tyre_data = the *_strategy.json output)."""
     col_left, col_right = st.columns(2)
 
     with col_left:
         _render_isolation_forest_column(df_mistakes, meta, (mistake_events or {}).get("events"))
 
     with col_right:
-        _render_lstm_column(tyre_data)
+        _render_strategy_column(tyre_data)
