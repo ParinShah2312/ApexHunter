@@ -24,7 +24,7 @@ Status: ✅ done · 🔄 in progress · ⏳ to do · ⏸ deferred
 | Docs condensed; team guide (`TEAM_GUIDE.md`, gitignored) | ✅ |
 | **Dashboard redesign (§3)** | ✅ done (2026-11-05) |
 | Report (DSML, 21 pages) + presentation (DSML + DL, 25 slides) in `docs/submission/`: rebuilt 2026-11-05 (final numbers, autoencoder, synthetic-mistake test with its limit and the real-lap check, dashboard section, one baseline row per comparison) | 🔄 user review |
-| Outputs for every race and driver (#7) | ⏸ not confirmed |
+| Outputs for every race and driver (#7) | ✖ not doing (user, 2026-11-05: mistakes would take ~60 h; pit windows exist for 8 races) |
 
 ## 2. Scope (fixed)
 
@@ -103,7 +103,7 @@ Build order:
 
 ## 4. Bug log
 
-All fixed except #7 (⏸). Each fix has a test that fails on the old code
+All fixed; #7 will not be done (user decision). Each fix has a test that fails on the old code
 or a recorded real-data check. Details: archived roadmap.
 
 | # | Bug |
@@ -114,7 +114,7 @@ or a recorded real-data check. Details: archived roadmap.
 | 4 | "Mistake Rate" card showed the contamination setting |
 | 5 | Two FastF1 cache folders; scipy missing from requirements |
 | 6 | Sidebar credits |
-| 7 | Outputs for more sessions/drivers ⏸ |
+| 7 | Outputs for more sessions/drivers — not doing (user decision) |
 | 8 | Stale Isolation Forest tests; contamination chosen by a score that always picked the smallest |
 | 9 | Log line crashed the Windows console; wrong value printed |
 | 10 | Deprecated Streamlit component |
